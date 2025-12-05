@@ -1,0 +1,1 @@
+# react-multiroot-architecture-doc
