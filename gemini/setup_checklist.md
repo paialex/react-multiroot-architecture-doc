@@ -330,34 +330,65 @@ export class ErrorBoundary extends React.Component {
 (function() {
   'use strict';
   
+  // ⚠️ UPDATE THESE FOR YOUR PROJECT
+  var CLIENTLIB_NAME = 'clientlib-react';
+  var PROJECT_NAME = 'YOUR-PROJECT';
+  
+  /**
+   * Resolve clientlib base path.
+   * Handles standard paths AND versioned/minified paths like:
+   * /etc.clientlibs/project/clientlibs/clientlib-react.[lc-hash].min.js
+   */
   function getClientlibBasePath() {
     var currentScript = document.currentScript;
-    if (currentScript && currentScript.src) {
-      return currentScript.src.replace(/\/js\/loader\.js.*$/, '');
+    var src = currentScript ? currentScript.src : null;
+    
+    if (!src) {
+      var scripts = document.querySelectorAll('script[src*="' + CLIENTLIB_NAME + '"]');
+      if (scripts.length > 0) {
+        src = scripts[scripts.length - 1].src;
+      }
     }
     
-    var scripts = document.querySelectorAll('script[src*="clientlib-react"][src*="loader.js"]');
-    if (scripts.length > 0) {
-      return scripts[scripts.length - 1].src.replace(/\/js\/loader\.js.*$/, '');
+    if (!src) {
+      return '/etc.clientlibs/' + PROJECT_NAME + '/clientlibs/' + CLIENTLIB_NAME;
     }
     
-    // ⚠️ UPDATE THIS FALLBACK PATH FOR YOUR PROJECT
-    console.warn('[React Loader] Using fallback path');
-    return '/etc.clientlibs/YOUR-PROJECT/clientlibs/clientlib-react';
+    var url = new URL(src, window.location.origin);
+    var pathname = url.pathname;
+    
+    // Standard path: /clientlib-react/js/loader.js
+    var standardMatch = pathname.match(new RegExp('(.*/' + CLIENTLIB_NAME + ')/js/'));
+    if (standardMatch) {
+      return url.origin + standardMatch[1];
+    }
+    
+    // Versioned path: /clientlib-react.[hash].min.js or /clientlib-react.min.js
+    var versionedMatch = pathname.match(new RegExp('(.*/' + CLIENTLIB_NAME + ')[\\.\\[]'));
+    if (versionedMatch) {
+      return url.origin + versionedMatch[1];
+    }
+    
+    // Fallback: find clientlib name in path
+    var idx = pathname.indexOf('/' + CLIENTLIB_NAME);
+    if (idx !== -1) {
+      return url.origin + pathname.substring(0, idx + CLIENTLIB_NAME.length + 1);
+    }
+    
+    return '/etc.clientlibs/' + PROJECT_NAME + '/clientlibs/' + CLIENTLIB_NAME;
   }
   
   function loadReactApp() {
     var basePath = getClientlibBasePath();
-    if (!basePath) {
-      console.error('[React Loader] Failed to resolve clientlib path.');
-      return;
-    }
+    var modulePath = basePath + '/resources/main.js';
+    
+    console.log('[React Loader] Loading from:', modulePath);
     
     var script = document.createElement('script');
     script.type = 'module';
-    script.src = basePath + '/resources/main.js';
+    script.src = modulePath;
     script.onerror = function() {
-      console.error('[React Loader] Failed to load:', script.src);
+      console.error('[React Loader] Failed to load:', modulePath);
     };
     document.body.appendChild(script);
   }

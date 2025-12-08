@@ -244,32 +244,94 @@ First, create the loader script in your frontend module (NOT in ui.apps):
 (function() {
   'use strict';
   
+  // ============================================================================
+  // Configuration - Update these for your project
+  // ============================================================================
+  
+  var CLIENTLIB_NAME = 'clientlib-react';  // Your clientlib folder name
+  var PROJECT_NAME = 'my-project';          // Your project name in /apps/
+  
+  // ============================================================================
+  // Path Detection
+  // ============================================================================
+  
   /**
    * Resolve the path to the resources folder of this clientlib.
-   * Handles both:
-   * - Proxy path: /etc.clientlibs/my-project/clientlibs/clientlib-react/js/loader.js
-   * - Direct path: /apps/my-project/clientlibs/clientlib-react/js/loader.js
+   * 
+   * AEM serves clientlib JS files in multiple formats:
+   * 
+   * 1. Direct path (author/no proxy):
+   *    /apps/my-project/clientlibs/clientlib-react/js/loader.js
+   * 
+   * 2. Proxy path (publish):
+   *    /etc.clientlibs/my-project/clientlibs/clientlib-react/js/loader.js
+   * 
+   * 3. Versioned/minified proxy path (with long-term caching):
+   *    /etc.clientlibs/my-project/clientlibs/clientlib-react.[lc-abc123-lc].min.js
+   *    /etc.clientlibs/my-project/clientlibs/clientlib-react.min.[hash].js
+   * 
+   * We need to extract the base path that works for accessing /resources/
    */
   function getClientlibBasePath() {
-    // Method 1: Use document.currentScript (works during sync execution)
     var currentScript = document.currentScript;
+    var src = currentScript ? currentScript.src : null;
     
-    if (currentScript && currentScript.src) {
-      // Remove '/js/loader.js' from the path
-      return currentScript.src.replace(/\/js\/loader\.js.*$/, '');
+    // Fallback: find script by pattern
+    if (!src) {
+      var scripts = document.querySelectorAll('script[src*="' + CLIENTLIB_NAME + '"]');
+      if (scripts.length > 0) {
+        src = scripts[scripts.length - 1].src;
+      }
     }
     
-    // Method 2: Fallback - find script by known pattern
-    var scripts = document.querySelectorAll('script[src*="clientlib-react"][src*="loader.js"]');
-    if (scripts.length > 0) {
-      var src = scripts[scripts.length - 1].src;
-      return src.replace(/\/js\/loader\.js.*$/, '');
+    if (!src) {
+      console.warn('[React Loader] Could not detect script source, using fallback.');
+      return '/etc.clientlibs/' + PROJECT_NAME + '/clientlibs/' + CLIENTLIB_NAME;
     }
     
-    // Method 3: Fallback - use known proxy path (modify for your project)
-    console.warn('[React Loader] Could not detect clientlib path, using fallback.');
-    return '/etc.clientlibs/my-project/clientlibs/clientlib-react';
+    // Parse the URL to extract the path
+    var url;
+    try {
+      url = new URL(src);
+    } catch (e) {
+      // Fallback for relative URLs
+      url = new URL(src, window.location.origin);
+    }
+    
+    var pathname = url.pathname;
+    
+    // Case 1: Standard path format (ends with /js/loader.js or similar)
+    // /etc.clientlibs/my-project/clientlibs/clientlib-react/js/loader.js
+    // → /etc.clientlibs/my-project/clientlibs/clientlib-react
+    var standardMatch = pathname.match(new RegExp('(.*/' + CLIENTLIB_NAME + ')/js/'));
+    if (standardMatch) {
+      return url.origin + standardMatch[1];
+    }
+    
+    // Case 2: Versioned/minified format (ends with hash and .js)
+    // /etc.clientlibs/my-project/clientlibs/clientlib-react.[lc-abc123].min.js
+    // /etc.clientlibs/my-project/clientlibs/clientlib-react.min.abc123.js
+    // → /etc.clientlibs/my-project/clientlibs/clientlib-react
+    var versionedMatch = pathname.match(new RegExp('(.*/' + CLIENTLIB_NAME + ')[\\.\\[]'));
+    if (versionedMatch) {
+      return url.origin + versionedMatch[1];
+    }
+    
+    // Case 3: Try to find clientlib name and extract everything before the hash/extension
+    var clientlibIndex = pathname.indexOf('/' + CLIENTLIB_NAME);
+    if (clientlibIndex !== -1) {
+      var basePath = pathname.substring(0, clientlibIndex + CLIENTLIB_NAME.length + 1);
+      return url.origin + basePath;
+    }
+    
+    // Fallback: return configured path
+    console.warn('[React Loader] Could not parse script path, using fallback.');
+    return '/etc.clientlibs/' + PROJECT_NAME + '/clientlibs/' + CLIENTLIB_NAME;
   }
+  
+  // ============================================================================
+  // Module Loading
+  // ============================================================================
   
   /**
    * Inject the ES Module script
@@ -284,14 +346,19 @@ First, create the loader script in your frontend module (NOT in ui.apps):
     
     var modulePath = basePath + '/resources/main.js';
     
+    // Debug logging (remove in production if desired)
+    console.log('[React Loader] Loading from:', modulePath);
+    
     // Create and inject the module script
     var script = document.createElement('script');
     script.type = 'module';
     script.src = modulePath;
     
-    // Optional: Add error handling
+    // Error handling
     script.onerror = function() {
       console.error('[React Loader] Failed to load React application from:', modulePath);
+      console.error('[React Loader] Detected base path was:', basePath);
+      console.error('[React Loader] Original script src:', document.currentScript ? document.currentScript.src : 'N/A');
     };
     
     // Append to body (ensures DOM is available when module executes)
