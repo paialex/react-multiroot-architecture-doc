@@ -313,94 +313,19 @@ export class ErrorBoundary extends React.Component {
 
 ## Phase 2: Clientlib Configuration
 
-### Step 2.1: Configure Clientlib Generator
+> ⚠️ **Important:** The clientlib generator regenerates the entire clientlib folder on each build.
+> To prevent files from being deleted, we include `loader.js` in the frontend source.
 
-**✅ 2.1.1 - Create `clientlib.config.js`**
+### Step 2.1: Create Loader Script in Frontend Source
 
-📝 **File:** `ui.frontend/clientlib.config.js`
+**✅ 2.1.1 - Create `loader.js` in src folder**
 
-```javascript
-const path = require('path');
-
-// ⚠️ UPDATE THESE PATHS FOR YOUR PROJECT
-const BUILD_DIR = path.join(__dirname, 'dist');
-const CLIENTLIB_DIR = path.join(
-  __dirname,
-  '../ui.apps/src/main/content/jcr_root/apps/YOUR-PROJECT/clientlibs'  // ← Change this!
-);
-
-module.exports = {
-  context: __dirname,
-  clientLibRoot: CLIENTLIB_DIR,
-  
-  libs: [
-    {
-      name: 'clientlib-react',
-      allowProxy: true,
-      categories: ['YOUR-PROJECT.react'],  // ← Change this!
-      serializationFormat: 'xml',
-      jsProcessor: ['default:none', 'min:none'],
-      cssProcessor: ['default:none', 'min:none'],
-      
-      assets: {
-        // ⚠️ Map to 'resources' folder, NOT 'js'
-        resources: {
-          cwd: BUILD_DIR,
-          files: ['**/*'],
-          flatten: false,
-        },
-      },
-    },
-  ],
-};
-```
-
-**⚠️ Configuration Checklist:**
-
-- [ ] `CLIENTLIB_DIR` path updated for your project
-- [ ] `categories` updated to match your project naming convention
-- [ ] Assets mapped to `resources` (not `js`)
-
----
-
-### Step 2.2: Run Initial Build
-
-**✅ 2.2.1 - Build and generate clientlib**
-
-```bash
-cd ui.frontend
-npm run build:clientlib
-```
-
-**✅ 2.2.2 - Verify output**
-
-Check that these files were created:
-
-```
-ui.apps/src/main/content/jcr_root/apps/YOUR-PROJECT/clientlibs/
-└── clientlib-react/
-    ├── resources/
-    │   ├── main.js
-    │   ├── vendor-[hash].js
-    │   └── assets/
-    │       └── main-[hash].css (if you have CSS)
-    └── .content.xml
-```
-
----
-
-## Phase 3: Manual File Creation (ui.apps)
-
-### Step 3.1: Create Loader Script
-
-**📝 3.1.1 - Create the js folder and loader.js**
-
-**File:** `ui.apps/.../clientlibs/clientlib-react/js/loader.js`
+📝 **File:** `ui.frontend/src/loader.js`
 
 ```javascript
 /**
- * React Widget Loader - ESM Bridge
- * DO NOT DELETE - Manually maintained
+ * React Widget Loader (ESM Bridge)
+ * This file is part of the build process - do not use import/export syntax.
  */
 (function() {
   'use strict';
@@ -443,42 +368,123 @@ ui.apps/src/main/content/jcr_root/apps/YOUR-PROJECT/clientlibs/
 
 ---
 
-### Step 3.2: Create js.txt
+### Step 2.2: Configure Clientlib Generator
 
-**📝 3.2.1 - Create js.txt reference file**
+**✅ 2.2.1 - Create `clientlib.config.js`**
 
-**File:** `ui.apps/.../clientlibs/clientlib-react/js.txt`
+📝 **File:** `ui.frontend/clientlib.config.js`
 
-```text
-#base=js
-loader.js
+```javascript
+const path = require('path');
+
+// ⚠️ UPDATE THESE PATHS FOR YOUR PROJECT
+const BUILD_DIR = path.join(__dirname, 'dist');
+const STATIC_DIR = path.join(__dirname, 'src');  // For loader.js
+const CLIENTLIB_DIR = path.join(
+  __dirname,
+  '../ui.apps/src/main/content/jcr_root/apps/YOUR-PROJECT/clientlibs'  // ← Change this!
+);
+
+module.exports = {
+  context: __dirname,
+  clientLibRoot: CLIENTLIB_DIR,
+  
+  libs: [
+    {
+      name: 'clientlib-react',
+      allowProxy: true,
+      categories: ['YOUR-PROJECT.react'],  // ← Change this!
+      serializationFormat: 'xml',
+      jsProcessor: ['default:none', 'min:none'],
+      cssProcessor: ['default:none', 'min:none'],
+      
+      assets: {
+        // 1. Loader script → goes to 'js' folder (loaded by AEM)
+        js: {
+          cwd: STATIC_DIR,
+          files: ['loader.js'],
+          flatten: true,
+        },
+        
+        // 2. Vite build output → goes to 'resources' folder
+        resources: {
+          cwd: BUILD_DIR,
+          files: ['**/*'],
+          flatten: false,
+        },
+      },
+    },
+  ],
+};
+```
+
+**⚠️ Configuration Checklist:**
+
+- [ ] `CLIENTLIB_DIR` path updated for your project
+- [ ] `STATIC_DIR` points to `src` folder (for loader.js)
+- [ ] `categories` updated to match your project naming convention
+- [ ] `js` asset maps `loader.js` from src folder
+- [ ] `resources` asset maps Vite output
+
+---
+
+### Step 2.3: Run Initial Build
+
+**✅ 2.3.1 - Build and generate clientlib**
+
+```bash
+cd ui.frontend
+npm run build:clientlib
+```
+
+**✅ 2.3.2 - Verify output**
+
+Check that these files were created:
+
+```
+ui.apps/src/main/content/jcr_root/apps/YOUR-PROJECT/clientlibs/
+└── clientlib-react/
+    ├── js/                    ← Generated (from src/loader.js)
+    │   └── loader.js
+    ├── js.txt                 ← Generated
+    ├── resources/             ← Generated (from dist/)
+    │   ├── main.js
+    │   ├── vendor-[hash].js
+    │   └── assets/
+    │       └── main-[hash].css (if you have CSS)
+    └── .content.xml           ← Generated
+```
+
+**✅ All files are now generated!** No manual file creation needed.
+
+---
+
+### Step 2.4: Updated Project Structure
+
+After setup, your structure should be:
+
+```
+ui.frontend/
+├── src/
+│   ├── main.jsx              # Widget Engine entry point
+│   ├── loader.js             # ESM Bridge (copied to clientlib/js/)
+│   ├── registry.js
+│   ├── components/
+│   └── utils/
+│       └── ErrorBoundary.jsx
+├── dist/                     # Vite build output
+├── vite.config.js
+├── clientlib.config.js
+└── package.json
 ```
 
 ---
 
-### Step 3.3: Verify Clientlib Structure
+## Phase 3: AEM Page Integration
 
-**✅ 3.3.1 - Final clientlib structure should be:**
+### Step 3.1: Add Clientlib to Page Template
 
-```
-clientlib-react/
-├── js/                    ← Manual
-│   └── loader.js          ← Manual
-├── js.txt                 ← Manual
-├── resources/             ← Generated
-│   ├── main.js
-│   ├── vendor-[hash].js
-│   └── assets/
-└── .content.xml           ← Generated
-```
-
----
-
-## Phase 4: AEM Page Integration
-
-### Step 4.1: Add Clientlib to Page Template
-
-**✅ 4.1.1 - Update customfooterlibs.html (or equivalent)**
+**✅ 3.1.1 - Update customfooterlibs.html (or equivalent)**
 
 **File:** `ui.apps/.../components/structure/page/customfooterlibs.html`
 
@@ -671,22 +677,23 @@ For each new React widget:
 
 ### Generated Files (by build process)
 
+- [ ] `clientlib-react/js/loader.js` (from `src/loader.js`)
+- [ ] `clientlib-react/js.txt`
 - [ ] `clientlib-react/resources/main.js`
 - [ ] `clientlib-react/resources/vendor-[hash].js`
 - [ ] `clientlib-react/.content.xml`
 
-### Manual Files (create once)
+### Source Files (in ui.frontend/src/)
 
-- [ ] `clientlib-react/js/loader.js`
-- [ ] `clientlib-react/js.txt`
+- [ ] `ui.frontend/src/loader.js` - ESM Bridge script
+- [ ] `ui.frontend/src/main.jsx` - Widget Engine
+- [ ] `ui.frontend/src/registry.js` - Component registry
+- [ ] `ui.frontend/src/utils/ErrorBoundary.jsx`
 
 ### Configuration Files
 
 - [ ] `ui.frontend/vite.config.js`
 - [ ] `ui.frontend/clientlib.config.js`
-- [ ] `ui.frontend/src/main.jsx`
-- [ ] `ui.frontend/src/registry.js`
-- [ ] `ui.frontend/src/utils/ErrorBoundary.jsx`
 
 ---
 

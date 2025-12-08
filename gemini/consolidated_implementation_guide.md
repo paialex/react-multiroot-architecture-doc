@@ -223,81 +223,23 @@ dist/
 
 ## 5. Clientlib Generator Configuration
 
-**File:** `ui.frontend/clientlib.config.js`
+The clientlib generator regenerates the entire clientlib folder on each build. To prevent `loader.js` from being deleted, we include it as part of the frontend source and copy it during the build process.
 
-```javascript
-const path = require('path');
+### 5.1 Create Loader Script in Frontend Source
 
-const BUILD_DIR = path.join(__dirname, 'dist');
-const CLIENTLIB_DIR = path.join(
-  __dirname,
-  '../ui.apps/src/main/content/jcr_root/apps/my-project/clientlibs'
-);
+First, create the loader script in your frontend module (NOT in ui.apps):
 
-module.exports = {
-  context: __dirname,
-  clientLibRoot: CLIENTLIB_DIR,
-  
-  libs: [
-    {
-      name: 'clientlib-react',
-      allowProxy: true,
-      categories: ['my-project.react'],
-      serializationFormat: 'xml',
-      
-      // IMPORTANT: Disable AEM's JS/CSS processing
-      // Vite already handles minification and optimization
-      jsProcessor: ['default:none', 'min:none'],
-      cssProcessor: ['default:none', 'min:none'],
-      
-      assets: {
-        // Map Vite output to 'resources' folder (NOT 'js')
-        // This preserves relative paths for ES Module imports
-        resources: {
-          cwd: BUILD_DIR,
-          files: ['**/*'],
-          flatten: false,
-        },
-        
-        // Optionally, also copy CSS to standard location for clientlib.css usage
-        // css: {
-        //   cwd: BUILD_DIR,
-        //   files: ['assets/**/*.css'],
-        //   flatten: false,
-        // },
-      },
-    },
-  ],
-};
-```
-
-### 5.1 Generator Behavior
-
-The `aem-clientlib-generator` will:
-
-1. Create `clientlib-react/` folder
-2. Copy `dist/**/*` to `clientlib-react/resources/`
-3. Generate `.content.xml` with the clientlib definition
-4. **NOT** create `js.txt` or `js/` folder (we create these manually)
-
----
-
-## 6. The Loader Script (ESM Bridge)
-
-This is the critical bridge between AEM's standard script loading and ES Modules.
-
-**File:** `ui.apps/.../clientlibs/clientlib-react/js/loader.js`
+**File:** `ui.frontend/src/loader.js`
 
 ```javascript
 /**
- * React Widget Loader
+ * React Widget Loader (ESM Bridge)
  * 
  * This script is loaded as a standard <script> tag by AEM Clientlibs.
  * Its purpose is to dynamically inject the actual React application
  * as an ES Module, which browsers can properly handle.
  * 
- * DO NOT DELETE - This file is manually maintained.
- * DO NOT use import/export syntax in this file.
+ * This file is part of the build process - do not use import/export syntax.
  */
 (function() {
   'use strict';
@@ -362,19 +304,239 @@ This is the critical bridge between AEM's standard script loading and ES Modules
 })();
 ```
 
-**File:** `ui.apps/.../clientlibs/clientlib-react/js.txt`
+### 5.2 Create js.txt Template
+
+**File:** `ui.frontend/src/js.txt`
 
 ```text
 #base=js
 loader.js
 ```
 
-### 6.1 Why This Works
+### 5.3 Clientlib Generator Configuration
 
-1. AEM loads `loader.js` as a standard `<script>` tag
-2. `loader.js` dynamically creates `<script type="module" src=".../resources/main.js">`
-3. Browser loads `main.js` as an ES Module
-4. All `import` statements in `main.js` work correctly (relative to `/resources/`)
+**File:** `ui.frontend/clientlib.config.js`
+
+```javascript
+const path = require('path');
+
+const BUILD_DIR = path.join(__dirname, 'dist');
+const STATIC_DIR = path.join(__dirname, 'src');  // For loader.js
+const CLIENTLIB_DIR = path.join(
+  __dirname,
+  '../ui.apps/src/main/content/jcr_root/apps/my-project/clientlibs'
+);
+
+module.exports = {
+  context: __dirname,
+  clientLibRoot: CLIENTLIB_DIR,
+  
+  libs: [
+    {
+      name: 'clientlib-react',
+      allowProxy: true,
+      categories: ['my-project.react'],
+      serializationFormat: 'xml',
+      
+      // IMPORTANT: Disable AEM's JS/CSS processing
+      // Vite already handles minification and optimization
+      jsProcessor: ['default:none', 'min:none'],
+      cssProcessor: ['default:none', 'min:none'],
+      
+      assets: {
+        // 1. The loader script goes to standard 'js' folder
+        //    This is loaded by AEM as a regular script
+        js: {
+          cwd: STATIC_DIR,
+          files: ['loader.js'],
+          flatten: true,
+        },
+        
+        // 2. The Vite build output goes to 'resources' folder
+        //    This preserves relative paths for ES Module imports
+        resources: {
+          cwd: BUILD_DIR,
+          files: ['**/*'],
+          flatten: false,
+        },
+        
+        // 3. Optional: Copy CSS to standard location for clientlib.css usage
+        // css: {
+        //   cwd: BUILD_DIR,
+        //   files: ['assets/**/*.css'],
+        //   flatten: false,
+        // },
+      },
+      
+      // Include js.txt template
+      // The generator will use this to create js.txt in the clientlib
+    },
+  ],
+};
+```
+
+### 5.4 Alternative: Using Vite Copy Plugin
+
+If you prefer to handle this entirely in Vite, you can use a copy plugin:
+
+**Install the plugin:**
+
+```bash
+npm install -D vite-plugin-static-copy
+```
+
+**Update vite.config.js:**
+
+```javascript
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+import { viteStaticCopy } from 'vite-plugin-static-copy';
+import path from 'path';
+
+export default defineConfig({
+  plugins: [
+    react(),
+    viteStaticCopy({
+      targets: [
+        {
+          src: 'src/loader.js',
+          dest: '../js',  // Will create dist/js/loader.js
+        },
+      ],
+    }),
+  ],
+  // ... rest of config
+});
+```
+
+Then update clientlib.config.js to use the dist folder for both:
+
+```javascript
+assets: {
+  js: {
+    cwd: BUILD_DIR,
+    files: ['js/loader.js'],
+    flatten: true,
+  },
+  resources: {
+    cwd: BUILD_DIR,
+    files: ['*.js', 'assets/**/*'],  // Exclude js folder
+    flatten: false,
+  },
+},
+```
+
+### 5.5 Generator Behavior
+
+With this configuration, `aem-clientlib-generator` will:
+
+1. **Regenerate** `clientlib-react/` folder completely (this is expected)
+2. **Copy** `loader.js` to `clientlib-react/js/loader.js`
+3. **Copy** Vite output to `clientlib-react/resources/`
+4. **Generate** `.content.xml` with the clientlib definition
+5. **Generate** `js.txt` referencing `loader.js`
+
+**Result:** No more manual file management needed. Everything is part of the build process.
+
+### 5.6 Updated Project Structure
+
+```
+ui.frontend/
+├── src/
+│   ├── main.jsx              # Widget Engine entry point
+│   ├── loader.js             # ESM Bridge (copied to clientlib/js/)
+│   ├── js.txt                # js.txt template (optional)
+│   ├── registry.js
+│   └── components/
+├── dist/                     # Vite build output
+├── vite.config.js
+├── clientlib.config.js
+└── package.json
+```
+
+---
+
+## 6. The Loader Script (ESM Bridge)
+
+The loader script bridges AEM's standard script loading with ES Modules. As shown in Section 5.1, this file now lives in `ui.frontend/src/loader.js` and is automatically copied during the build process.
+
+### 6.1 Why This Pattern Works
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Script Loading Flow                           │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  1. AEM includes clientlib                                       │
+│     <sly data-sly-call="${clientlib.js}"/>                       │
+│                         │                                        │
+│                         ▼                                        │
+│  2. AEM generates standard script tag                            │
+│     <script src=".../clientlib-react/js/loader.js"></script>     │
+│                         │                                        │
+│                         ▼                                        │
+│  3. loader.js executes (standard JS, no modules)                 │
+│     - Detects its own path                                       │
+│     - Creates: <script type="module" src=".../resources/main.js">│
+│                         │                                        │
+│                         ▼                                        │
+│  4. Browser loads main.js as ES Module                           │
+│     - import statements work correctly                           │
+│     - Relative paths resolve to /resources/                      │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 6.2 Loader Script Details
+
+The loader script (from Section 5.1) performs these key functions:
+
+1. **Path Detection:** Uses `document.currentScript` to find its own URL
+2. **Path Calculation:** Removes `/js/loader.js` to get the clientlib base path
+3. **Module Injection:** Creates a `<script type="module">` pointing to `/resources/main.js`
+4. **Error Handling:** Logs errors if the module fails to load
+
+### 6.3 Customizing the Loader
+
+**For multiple React apps on different pages:**
+
+```javascript
+(function() {
+  'use strict';
+  
+  function getClientlibBasePath() {
+    var currentScript = document.currentScript;
+    if (currentScript && currentScript.src) {
+      return currentScript.src.replace(/\/js\/loader\.js.*$/, '');
+    }
+    return null;
+  }
+  
+  function loadReactApp() {
+    var basePath = getClientlibBasePath();
+    if (!basePath) return;
+    
+    // Check if any React widgets exist on the page before loading
+    var hasWidgets = document.querySelector('[data-widget-component]');
+    if (!hasWidgets) {
+      console.log('[React Loader] No widgets found, skipping load.');
+      return;
+    }
+    
+    var script = document.createElement('script');
+    script.type = 'module';
+    script.src = basePath + '/resources/main.js';
+    document.body.appendChild(script);
+  }
+  
+  // Wait for DOM if needed
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', loadReactApp);
+  } else {
+    loadReactApp();
+  }
+})();
+```
 
 ---
 
