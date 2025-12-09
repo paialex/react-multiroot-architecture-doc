@@ -325,13 +325,18 @@ export class ErrorBoundary extends React.Component {
 ```javascript
 /**
  * React Widget Loader (ESM Bridge + CSS Loader)
+<<<<<<< HEAD
  * Features: Widget detection, preload hints, versioned URL handling
+=======
+ * This file is part of the build process - do not use import/export syntax.
+>>>>>>> 11fdd3cc3b399c68880b7138ac228d1f00d83550
  */
 (function() {
   'use strict';
   
   // ⚠️ UPDATE THESE FOR YOUR PROJECT
   var CLIENTLIB_NAME = 'clientlib-react';
+<<<<<<< HEAD
   var PROJECT_NAME = 'aemcs-nbc-sites';
   var CSS_FILENAME = 'main.css';
   var JS_FILENAME = 'main.js';
@@ -343,6 +348,11 @@ export class ErrorBoundary extends React.Component {
     if (window.Granite && window.Granite.author) return true; // Always load in author mode
     return false;
   }
+=======
+  var PROJECT_NAME = 'YOUR-PROJECT';
+  var CSS_FILENAME = 'main.css';
+  var JS_FILENAME = 'main.js';
+>>>>>>> 11fdd3cc3b399c68880b7138ac228d1f00d83550
   
   function getClientlibBasePath() {
     var currentScript = document.currentScript;
@@ -361,15 +371,24 @@ export class ErrorBoundary extends React.Component {
     var standardMatch = pathname.match(new RegExp('(.*/' + CLIENTLIB_NAME + ')/js/'));
     if (standardMatch) return url.origin + standardMatch[1];
     
+<<<<<<< HEAD
     var versionedMatch = pathname.match(new RegExp('(.*/' + CLIENTLIB_NAME + ')[\\.\\[]'));
     if (versionedMatch) return url.origin + versionedMatch[1];
     
+=======
+    // Versioned path: /clientlib-react.[hash].min.js
+    var versionedMatch = pathname.match(new RegExp('(.*/' + CLIENTLIB_NAME + ')[\\.\\[]'));
+    if (versionedMatch) return url.origin + versionedMatch[1];
+    
+    // Fallback
+>>>>>>> 11fdd3cc3b399c68880b7138ac228d1f00d83550
     var idx = pathname.indexOf('/' + CLIENTLIB_NAME);
     if (idx !== -1) return url.origin + pathname.substring(0, idx + CLIENTLIB_NAME.length + 1);
     
     return '/etc.clientlibs/' + PROJECT_NAME + '/clientlibs/' + CLIENTLIB_NAME;
   }
   
+<<<<<<< HEAD
   // Add preload hints for better performance
   function addPreloadHints(basePath) {
     var cssPath = basePath + '/resources/assets/' + CSS_FILENAME;
@@ -395,6 +414,13 @@ export class ErrorBoundary extends React.Component {
     var cssPath = basePath + '/resources/assets/' + CSS_FILENAME;
     if (document.querySelector('link[href*="' + CSS_FILENAME + '"][rel="stylesheet"]')) return;
     
+=======
+  function loadStyles(basePath) {
+    var cssPath = basePath + '/resources/assets/' + CSS_FILENAME;
+    if (document.querySelector('link[href*="' + CSS_FILENAME + '"]')) return;
+    
+    console.log('[React Loader] Loading CSS:', cssPath);
+>>>>>>> 11fdd3cc3b399c68880b7138ac228d1f00d83550
     var link = document.createElement('link');
     link.rel = 'stylesheet';
     link.href = cssPath;
@@ -404,7 +430,11 @@ export class ErrorBoundary extends React.Component {
   
   function loadScript(basePath) {
     var jsPath = basePath + '/resources/' + JS_FILENAME;
+<<<<<<< HEAD
     if (document.querySelector('script[src*="' + JS_FILENAME + '"]')) return;
+=======
+    console.log('[React Loader] Loading JS:', jsPath);
+>>>>>>> 11fdd3cc3b399c68880b7138ac228d1f00d83550
     
     var script = document.createElement('script');
     script.type = 'module';
@@ -414,6 +444,7 @@ export class ErrorBoundary extends React.Component {
   }
   
   function init() {
+<<<<<<< HEAD
     if (!hasWidgetsOnPage()) {
       console.log('[React Loader] No widgets found, skipping load.');
       return;
@@ -423,6 +454,10 @@ export class ErrorBoundary extends React.Component {
     console.log('[React Loader] Loading from:', basePath);
     
     addPreloadHints(basePath);
+=======
+    var basePath = getClientlibBasePath();
+    console.log('[React Loader] Base path:', basePath);
+>>>>>>> 11fdd3cc3b399c68880b7138ac228d1f00d83550
     loadStyles(basePath);
     loadScript(basePath);
   }
