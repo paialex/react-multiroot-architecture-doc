@@ -1,20 +1,35 @@
+---
+inclusion: always
+---
+
 # Product Overview
 
-This project demonstrates the **Multi-Root Mounting Strategy** for integrating React.js components into Adobe Experience Manager (AEM) static HTML pages.
+React-AEM integration POC using **Multi-Root Mounting Strategy** (Islands Architecture).
 
-## Purpose
+## Core Architecture
 
-A Proof of Concept (POC) showing how independent React widgets can coexist within server-rendered AEM pages using an "Islands Architecture" approach.
+- **AEM (Server)**: Primary renderer via Sling/HTL - owns page structure and content
+- **React (Client)**: Widget Engine for interactive islands only - not a full SPA
+- **Multi-Root Pattern**: Each widget = independent React root for fault isolation
 
-## Key Concepts
+## Widget Engine Behavior
 
-- **Widget Engine**: JavaScript runtime that discovers and mounts React components at designated DOM locations
-- **Islands Architecture**: Static HTML with interactive React "islands" - AEM controls page rendering, React handles interactivity
-- **Multi-Root Pattern**: Each widget gets its own independent React root for fault isolation
+1. Scans DOM for `.react-widget-container` elements
+2. Reads `data-widget-component` to identify component
+3. Parses `data-props` JSON for configuration
+4. Mounts isolated React root with `Suspense` fallback
 
-## Design Philosophy
+## Critical Constraints
 
-- Sling/HTL is the primary renderer (server-side)
-- React serves as the Widget Engine for interactive elements only
-- Widgets are isolated - no shared state or cross-widget communication
-- Content authors configure widgets through AEM dialogs
+- **No shared state** between widgets - each is fully isolated
+- **No cross-widget communication** - widgets don't know about each other
+- **AEM dialogs** control widget configuration (props come from server)
+- **Lazy loading** required - widgets code-split via `React.lazy()`
+
+## When Building Widgets
+
+- Export component as default from JSX file
+- Register in `registry.js` with lazy import
+- Use Tailwind CSS for styling
+- Accept all configuration via props (from `data-props`)
+- Include skeleton/loading state for Suspense boundary
