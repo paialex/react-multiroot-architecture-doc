@@ -148,6 +148,55 @@ my-aem-project/
 
 ## 4. Vite Build Configuration
 
+### 4.1 Install Dependencies
+
+```bash
+cd ui.frontend
+
+# Core dependencies
+npm install react react-dom
+
+# Build tools
+npm install -D vite @vitejs/plugin-react aem-clientlib-generator
+```
+
+### 4.2 Create CSS Entry Point
+
+**File:** `ui.frontend/src/styles/main.css`
+
+```css
+/* Base styles for React widgets */
+.react-widget-container {
+  min-height: 100px;
+}
+
+.widget-skeleton {
+  animation: skeleton-pulse 1.5s ease-in-out infinite;
+  background: #e0e0e0;
+  border-radius: 4px;
+}
+
+@keyframes skeleton-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* Add your component styles here */
+```
+
+### 4.3 Import CSS in Main Entry
+
+**File:** `ui.frontend/src/main.jsx` (add at the top)
+
+```javascript
+// Import CSS (will be extracted by Vite)
+import './styles/main.css';
+
+// ... rest of main.jsx
+```
+
+### 4.4 Vite Configuration
+
 **File:** `ui.frontend/vite.config.js`
 
 ```javascript
@@ -169,6 +218,9 @@ export default defineConfig({
     // Generate manifest.json for debugging and potential future integrations
     manifest: true,
     
+    // CSS code splitting - extract CSS into separate files
+    cssCodeSplit: false,  // false = single CSS file (recommended for AEM)
+    
     rollupOptions: {
       input: {
         main: path.resolve(__dirname, 'src/main.jsx'),
@@ -177,20 +229,23 @@ export default defineConfig({
         // CRITICAL: Force ES Module format
         format: 'es',
         
-        // Vendor splitting: React core in separate chunk for long-term caching
+        // Manual chunks for long-term caching
         manualChunks: {
+          // React core libraries
           vendor: ['react', 'react-dom'],
         },
         
         // Predictable naming for clientlib mapping
-        // Entry files: no hash (main.js)
         entryFileNames: '[name].js',
-        
-        // Chunks: include hash for cache busting (vendor-abc123.js, ProductCard-def456.js)
         chunkFileNames: '[name]-[hash].js',
         
-        // Assets (CSS, images): include hash
-        assetFileNames: 'assets/[name]-[hash].[ext]',
+        // Assets (CSS, images): predictable naming
+        assetFileNames: (assetInfo) => {
+          if (assetInfo.name && assetInfo.name.endsWith('.css')) {
+            return 'assets/[name][extname]';
+          }
+          return 'assets/[name]-[hash][extname]';
+        },
       },
     },
   },
@@ -204,7 +259,35 @@ export default defineConfig({
 });
 ```
 
-### 4.1 Build Output
+### 4.5 NPM Scripts
+
+**File:** `ui.frontend/package.json`
+
+```json
+{
+  "name": "ui.frontend",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "build:clientlib": "vite build && clientlib --verbose",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.2.0",
+    "aem-clientlib-generator": "^1.8.0",
+    "vite": "^5.0.0"
+  }
+}
+```
+
+### 4.6 Build Output
 
 After running `npm run build`, the `dist/` folder contains:
 
@@ -213,9 +296,9 @@ dist/
 ├── main.js                    # Widget Engine (entry point)
 ├── vendor-abc123.js           # React + ReactDOM (cached long-term)
 ├── ProductCard-def456.js      # Lazy-loaded component
-├── Calculator-ghi789.js       # Another lazy-loaded component
 ├── assets/
-│   └── main-xyz123.css        # Combined CSS (if any)
+│   ├── main.css               # All CSS (single file)
+│   └── logo-xyz123.svg        # Static assets
 └── manifest.json              # Build manifest
 ```
 
@@ -233,11 +316,18 @@ First, create the loader script in your frontend module (NOT in ui.apps):
 
 ```javascript
 /**
- * React Widget Loader (ESM Bridge)
+ * React Widget Loader (ESM Bridge + CSS Loader)
  * 
  * This script is loaded as a standard <script> tag by AEM Clientlibs.
- * Its purpose is to dynamically inject the actual React application
- * as an ES Module, which browsers can properly handle.
+ * It dynamically injects:
+ *   1. The React application as an ES Module
+ *   2. The CSS stylesheet
+ * 
+ * Features:
+ *   - Handles versioned/minified AEM clientlib URLs
+ *   - Skips loading if no widgets exist on the page
+ *   - Adds preload hints for better performance
+ *   - Prevents duplicate loading
  * 
  * This file is part of the build process - do not use import/export syntax.
  */
@@ -248,8 +338,35 @@ First, create the loader script in your frontend module (NOT in ui.apps):
   // Configuration - Update these for your project
   // ============================================================================
   
-  var CLIENTLIB_NAME = 'clientlib-react';  // Your clientlib folder name
-  var PROJECT_NAME = 'my-project';          // Your project name in /apps/
+  var CLIENTLIB_NAME = 'clientlib-react';      // Your clientlib folder name
+  var PROJECT_NAME = 'aemcs-nbc-sites';         // Your project name in /apps/
+  var CSS_FILENAME = 'main.css';            // CSS filename (matches Vite output)
+  var JS_FILENAME = 'main.js';              // JS filename (matches Vite output)
+  var WIDGET_SELECTOR = '[data-widget-component]';  // Widget container selector
+  
+  // ============================================================================
+  // Widget Detection
+  // ============================================================================
+  
+  /**
+   * Check if any React widgets exist on the page.
+   * Skips loading React if no widgets are found (performance optimization).
+   */
+  function hasWidgetsOnPage() {
+    // Check current DOM
+    if (document.querySelector(WIDGET_SELECTOR)) {
+      return true;
+    }
+    
+    // For pages that might add widgets dynamically via AEM author,
+    // always load in author mode
+    if (window.Granite && window.Granite.author) {
+      console.log('[React Loader] AEM Author mode detected, loading React.');
+      return true;
+    }
+    
+    return false;
+  }
   
   // ============================================================================
   // Path Detection
@@ -330,13 +447,110 @@ First, create the loader script in your frontend module (NOT in ui.apps):
   }
   
   // ============================================================================
-  // Module Loading
+  // Preload Hints (Performance Optimization)
+  // ============================================================================
+  
+  /**
+   * Add preload hints to tell the browser to start fetching resources early.
+   * This improves perceived performance by parallelizing downloads.
+   */
+  function addPreloadHints(basePath) {
+    var jsPath = basePath + '/resources/' + JS_FILENAME;
+    var cssPath = basePath + '/resources/assets/' + CSS_FILENAME;
+    
+    // Preload the CSS stylesheet
+    if (!document.querySelector('link[rel="preload"][href*="' + CSS_FILENAME + '"]')) {
+      var preloadCSS = document.createElement('link');
+      preloadCSS.rel = 'preload';
+      preloadCSS.as = 'style';
+      preloadCSS.href = cssPath;
+      document.head.appendChild(preloadCSS);
+    }
+    
+    // Modulepreload for the main JavaScript (better than preload for ES modules)
+    if (!document.querySelector('link[rel="modulepreload"][href*="' + JS_FILENAME + '"]')) {
+      var preloadJS = document.createElement('link');
+      preloadJS.rel = 'modulepreload';
+      preloadJS.href = jsPath;
+      document.head.appendChild(preloadJS);
+    }
+  }
+  
+  // ============================================================================
+  // CSS Loading
+  // ============================================================================
+  
+  /**
+   * Inject the CSS stylesheet
+   */
+  function loadStyles(basePath) {
+    var cssPath = basePath + '/resources/assets/' + CSS_FILENAME;
+    
+    // Check if CSS is already loaded (prevent duplicates)
+    var existingLink = document.querySelector('link[href*="' + CSS_FILENAME + '"][rel="stylesheet"]');
+    if (existingLink) {
+      console.log('[React Loader] CSS already loaded, skipping.');
+      return;
+    }
+    
+    console.log('[React Loader] Loading CSS from:', cssPath);
+    
+    var link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.type = 'text/css';
+    link.href = cssPath;
+    
+    link.onerror = function() {
+      console.error('[React Loader] Failed to load CSS from:', cssPath);
+    };
+    
+    // Insert at the end of <head>
+    document.head.appendChild(link);
+  }
+  
+  // ============================================================================
+  // JavaScript Module Loading
   // ============================================================================
   
   /**
    * Inject the ES Module script
    */
-  function loadReactApp() {
+  function loadScript(basePath) {
+    var modulePath = basePath + '/resources/' + JS_FILENAME;
+    
+    // Check if already loaded (prevent duplicates)
+    var existingScript = document.querySelector('script[src*="' + JS_FILENAME + '"]');
+    if (existingScript) {
+      console.log('[React Loader] JS already loaded, skipping.');
+      return;
+    }
+    
+    console.log('[React Loader] Loading JS from:', modulePath);
+    
+    var script = document.createElement('script');
+    script.type = 'module';
+    script.src = modulePath;
+    
+    script.onerror = function() {
+      console.error('[React Loader] Failed to load React application from:', modulePath);
+      console.error('[React Loader] Detected base path was:', basePath);
+    };
+    
+    // Append to body (ensures DOM is available when module executes)
+    document.body.appendChild(script);
+  }
+  
+  // ============================================================================
+  // Main Initialization
+  // ============================================================================
+  
+  function init() {
+    // Skip loading if no widgets exist on the page (performance optimization)
+    if (!hasWidgetsOnPage()) {
+      console.log('[React Loader] No widgets found on page, skipping React load.');
+      return;
+    }
+    
     var basePath = getClientlibBasePath();
     
     if (!basePath) {
@@ -344,29 +558,21 @@ First, create the loader script in your frontend module (NOT in ui.apps):
       return;
     }
     
-    var modulePath = basePath + '/resources/main.js';
+    console.log('[React Loader] Clientlib base path:', basePath);
+    console.log('[React Loader] Widgets detected, loading React application...');
     
-    // Debug logging (remove in production if desired)
-    console.log('[React Loader] Loading from:', modulePath);
+    // Add preload hints first (tells browser to start fetching early)
+    addPreloadHints(basePath);
     
-    // Create and inject the module script
-    var script = document.createElement('script');
-    script.type = 'module';
-    script.src = modulePath;
+    // Load CSS (non-blocking, but after preload hint)
+    loadStyles(basePath);
     
-    // Error handling
-    script.onerror = function() {
-      console.error('[React Loader] Failed to load React application from:', modulePath);
-      console.error('[React Loader] Detected base path was:', basePath);
-      console.error('[React Loader] Original script src:', document.currentScript ? document.currentScript.src : 'N/A');
-    };
-    
-    // Append to body (ensures DOM is available when module executes)
-    document.body.appendChild(script);
+    // Load JavaScript module
+    loadScript(basePath);
   }
   
   // Execute immediately
-  loadReactApp();
+  init();
   
 })();
 ```
@@ -391,7 +597,7 @@ const BUILD_DIR = path.join(__dirname, 'dist');
 const STATIC_DIR = path.join(__dirname, 'src');  // For loader.js
 const CLIENTLIB_DIR = path.join(
   __dirname,
-  '../ui.apps/src/main/content/jcr_root/apps/my-project/clientlibs'
+  '../ui.apps/src/main/content/jcr_root/apps/aemcs-nbc-sites/clientlibs'
 );
 
 module.exports = {
@@ -402,7 +608,7 @@ module.exports = {
     {
       name: 'clientlib-react',
       allowProxy: true,
-      categories: ['my-project.react'],
+      categories: ['aemcs-nbc-sites.react'],
       serializationFormat: 'xml',
       
       // IMPORTANT: Disable AEM's JS/CSS processing
@@ -563,46 +769,84 @@ The loader script (from Section 5.1) performs these key functions:
 3. **Module Injection:** Creates a `<script type="module">` pointing to `/resources/main.js`
 4. **Error Handling:** Logs errors if the module fails to load
 
-### 6.3 Customizing the Loader
+### 6.3 Customizing the Loader (Optional Variations)
 
-**For multiple React apps on different pages:**
+> ⚠️ **Note:** The complete, production-ready loader.js is in **Section 5.1**. The examples below show **optional modifications** you can apply to that base code for specific use cases.
+
+#### Variation A: Conditional Loading (Only if Widgets Exist)
+
+Add this check to the `init()` function in your loader.js to skip loading if no widgets are on the page:
 
 ```javascript
-(function() {
-  'use strict';
-  
-  function getClientlibBasePath() {
-    var currentScript = document.currentScript;
-    if (currentScript && currentScript.src) {
-      return currentScript.src.replace(/\/js\/loader\.js.*$/, '');
-    }
-    return null;
+function init() {
+  // Check if any React widgets exist on the page before loading
+  var hasWidgets = document.querySelector('[data-widget-component]');
+  if (!hasWidgets) {
+    console.log('[React Loader] No widgets found on page, skipping load.');
+    return;
   }
   
-  function loadReactApp() {
-    var basePath = getClientlibBasePath();
-    if (!basePath) return;
-    
-    // Check if any React widgets exist on the page before loading
-    var hasWidgets = document.querySelector('[data-widget-component]');
-    if (!hasWidgets) {
-      console.log('[React Loader] No widgets found, skipping load.');
-      return;
-    }
-    
-    var script = document.createElement('script');
-    script.type = 'module';
-    script.src = basePath + '/resources/main.js';
-    document.body.appendChild(script);
+  var basePath = getClientlibBasePath();
+  if (!basePath) {
+    console.error('[React Loader] Failed to resolve clientlib base path.');
+    return;
   }
   
-  // Wait for DOM if needed
+  loadStyles(basePath);
+  loadScript(basePath);
+}
+```
+
+#### Variation B: Wait for DOM Ready
+
+If your loader script is in the `<head>`, wait for DOM:
+
+```javascript
+function init() {
+  var basePath = getClientlibBasePath();
+  if (!basePath) return;
+  
+  loadStyles(basePath);  // CSS can load immediately
+  
+  // Wait for DOM before loading JS (widgets need to exist)
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', loadReactApp);
+    document.addEventListener('DOMContentLoaded', function() {
+      loadScript(basePath);
+    });
   } else {
-    loadReactApp();
+    loadScript(basePath);
   }
-})();
+}
+```
+
+#### Variation C: Preload Hints for Performance
+
+Add preload hints for critical resources:
+
+```javascript
+function addPreloadHints(basePath) {
+  // Preload the main JS module
+  var preloadJS = document.createElement('link');
+  preloadJS.rel = 'modulepreload';
+  preloadJS.href = basePath + '/resources/' + JS_FILENAME;
+  document.head.appendChild(preloadJS);
+  
+  // Preload the CSS
+  var preloadCSS = document.createElement('link');
+  preloadCSS.rel = 'preload';
+  preloadCSS.as = 'style';
+  preloadCSS.href = basePath + '/resources/assets/' + CSS_FILENAME;
+  document.head.appendChild(preloadCSS);
+}
+
+function init() {
+  var basePath = getClientlibBasePath();
+  if (!basePath) return;
+  
+  addPreloadHints(basePath);  // Add hints first
+  loadStyles(basePath);
+  loadScript(basePath);
+}
 ```
 
 ---
@@ -969,7 +1213,7 @@ export function registerComponent(name, component) {
         This loads loader.js, which then bootstraps the ES Module application.
         The dependency on vendor code is handled internally by the modules.
     */-->
-    <sly data-sly-call="${clientlib.js @ categories='my-project.react'}"/>
+    <sly data-sly-call="${clientlib.js @ categories='aemcs-nbc-sites.react'}"/>
     
     <!--/* 
         CSS: Two options depending on your clientlib configuration
@@ -980,7 +1224,7 @@ export function registerComponent(name, component) {
         Option 2: If CSS is in 'resources' folder (current setup):
     */-->
     <link rel="stylesheet" 
-          href="/etc.clientlibs/my-project/clientlibs/clientlib-react/resources/assets/main.css" 
+          href="/etc.clientlibs/aemcs-nbc-sites/clientlibs/clientlib-react/resources/assets/main.css" 
           type="text/css">
 </sly>
 ```
@@ -1007,7 +1251,7 @@ assets: {
 Then use:
 
 ```html
-<sly data-sly-call="${clientlib.css @ categories='my-project.react'}"/>
+<sly data-sly-call="${clientlib.css @ categories='aemcs-nbc-sites.react'}"/>
 ```
 
 ---

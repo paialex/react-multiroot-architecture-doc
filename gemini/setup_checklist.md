@@ -324,76 +324,110 @@ export class ErrorBoundary extends React.Component {
 
 ```javascript
 /**
- * React Widget Loader (ESM Bridge)
- * This file is part of the build process - do not use import/export syntax.
+ * React Widget Loader (ESM Bridge + CSS Loader)
+ * Features: Widget detection, preload hints, versioned URL handling
  */
 (function() {
   'use strict';
   
   // ⚠️ UPDATE THESE FOR YOUR PROJECT
   var CLIENTLIB_NAME = 'clientlib-react';
-  var PROJECT_NAME = 'YOUR-PROJECT';
+  var PROJECT_NAME = 'aemcs-nbc-sites';
+  var CSS_FILENAME = 'main.css';
+  var JS_FILENAME = 'main.js';
+  var WIDGET_SELECTOR = '[data-widget-component]';
   
-  /**
-   * Resolve clientlib base path.
-   * Handles standard paths AND versioned/minified paths like:
-   * /etc.clientlibs/project/clientlibs/clientlib-react.[lc-hash].min.js
-   */
+  // Check if widgets exist (skip loading if none found)
+  function hasWidgetsOnPage() {
+    if (document.querySelector(WIDGET_SELECTOR)) return true;
+    if (window.Granite && window.Granite.author) return true; // Always load in author mode
+    return false;
+  }
+  
   function getClientlibBasePath() {
     var currentScript = document.currentScript;
     var src = currentScript ? currentScript.src : null;
     
     if (!src) {
       var scripts = document.querySelectorAll('script[src*="' + CLIENTLIB_NAME + '"]');
-      if (scripts.length > 0) {
-        src = scripts[scripts.length - 1].src;
-      }
+      if (scripts.length > 0) src = scripts[scripts.length - 1].src;
     }
     
-    if (!src) {
-      return '/etc.clientlibs/' + PROJECT_NAME + '/clientlibs/' + CLIENTLIB_NAME;
-    }
+    if (!src) return '/etc.clientlibs/' + PROJECT_NAME + '/clientlibs/' + CLIENTLIB_NAME;
     
     var url = new URL(src, window.location.origin);
     var pathname = url.pathname;
     
-    // Standard path: /clientlib-react/js/loader.js
     var standardMatch = pathname.match(new RegExp('(.*/' + CLIENTLIB_NAME + ')/js/'));
-    if (standardMatch) {
-      return url.origin + standardMatch[1];
-    }
+    if (standardMatch) return url.origin + standardMatch[1];
     
-    // Versioned path: /clientlib-react.[hash].min.js or /clientlib-react.min.js
     var versionedMatch = pathname.match(new RegExp('(.*/' + CLIENTLIB_NAME + ')[\\.\\[]'));
-    if (versionedMatch) {
-      return url.origin + versionedMatch[1];
-    }
+    if (versionedMatch) return url.origin + versionedMatch[1];
     
-    // Fallback: find clientlib name in path
     var idx = pathname.indexOf('/' + CLIENTLIB_NAME);
-    if (idx !== -1) {
-      return url.origin + pathname.substring(0, idx + CLIENTLIB_NAME.length + 1);
-    }
+    if (idx !== -1) return url.origin + pathname.substring(0, idx + CLIENTLIB_NAME.length + 1);
     
     return '/etc.clientlibs/' + PROJECT_NAME + '/clientlibs/' + CLIENTLIB_NAME;
   }
   
-  function loadReactApp() {
-    var basePath = getClientlibBasePath();
-    var modulePath = basePath + '/resources/main.js';
+  // Add preload hints for better performance
+  function addPreloadHints(basePath) {
+    var cssPath = basePath + '/resources/assets/' + CSS_FILENAME;
+    var jsPath = basePath + '/resources/' + JS_FILENAME;
     
-    console.log('[React Loader] Loading from:', modulePath);
+    if (!document.querySelector('link[rel="preload"][href*="' + CSS_FILENAME + '"]')) {
+      var preloadCSS = document.createElement('link');
+      preloadCSS.rel = 'preload';
+      preloadCSS.as = 'style';
+      preloadCSS.href = cssPath;
+      document.head.appendChild(preloadCSS);
+    }
+    
+    if (!document.querySelector('link[rel="modulepreload"][href*="' + JS_FILENAME + '"]')) {
+      var preloadJS = document.createElement('link');
+      preloadJS.rel = 'modulepreload';
+      preloadJS.href = jsPath;
+      document.head.appendChild(preloadJS);
+    }
+  }
+  
+  function loadStyles(basePath) {
+    var cssPath = basePath + '/resources/assets/' + CSS_FILENAME;
+    if (document.querySelector('link[href*="' + CSS_FILENAME + '"][rel="stylesheet"]')) return;
+    
+    var link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = cssPath;
+    link.onerror = function() { console.error('[React Loader] CSS failed:', cssPath); };
+    document.head.appendChild(link);
+  }
+  
+  function loadScript(basePath) {
+    var jsPath = basePath + '/resources/' + JS_FILENAME;
+    if (document.querySelector('script[src*="' + JS_FILENAME + '"]')) return;
     
     var script = document.createElement('script');
     script.type = 'module';
-    script.src = modulePath;
-    script.onerror = function() {
-      console.error('[React Loader] Failed to load:', modulePath);
-    };
+    script.src = jsPath;
+    script.onerror = function() { console.error('[React Loader] JS failed:', jsPath); };
     document.body.appendChild(script);
   }
   
-  loadReactApp();
+  function init() {
+    if (!hasWidgetsOnPage()) {
+      console.log('[React Loader] No widgets found, skipping load.');
+      return;
+    }
+    
+    var basePath = getClientlibBasePath();
+    console.log('[React Loader] Loading from:', basePath);
+    
+    addPreloadHints(basePath);
+    loadStyles(basePath);
+    loadScript(basePath);
+  }
+  
+  init();
 })();
 ```
 
@@ -413,7 +447,7 @@ const BUILD_DIR = path.join(__dirname, 'dist');
 const STATIC_DIR = path.join(__dirname, 'src');  // For loader.js
 const CLIENTLIB_DIR = path.join(
   __dirname,
-  '../ui.apps/src/main/content/jcr_root/apps/YOUR-PROJECT/clientlibs'  // ← Change this!
+  '../ui.apps/src/main/content/jcr_root/apps/aemcs-nbc-sites/clientlibs'
 );
 
 module.exports = {
@@ -424,7 +458,7 @@ module.exports = {
     {
       name: 'clientlib-react',
       allowProxy: true,
-      categories: ['YOUR-PROJECT.react'],  // ← Change this!
+      categories: ['aemcs-nbc-sites.react'],
       serializationFormat: 'xml',
       jsProcessor: ['default:none', 'min:none'],
       cssProcessor: ['default:none', 'min:none'],
@@ -473,7 +507,7 @@ npm run build:clientlib
 Check that these files were created:
 
 ```
-ui.apps/src/main/content/jcr_root/apps/YOUR-PROJECT/clientlibs/
+ui.apps/src/main/content/jcr_root/apps/aemcs-nbc-sites/clientlibs/
 └── clientlib-react/
     ├── js/                    ← Generated (from src/loader.js)
     │   └── loader.js
@@ -522,11 +556,11 @@ ui.frontend/
 ```html
 <sly data-sly-use.clientlib="/libs/granite/sightly/templates/clientlib.html">
     <!-- Load React Widget Clientlib -->
-    <sly data-sly-call="${clientlib.js @ categories='YOUR-PROJECT.react'}"/>
+    <sly data-sly-call="${clientlib.js @ categories='aemcs-nbc-sites.react'}"/>
     
     <!-- CSS from resources folder -->
     <link rel="stylesheet" 
-          href="/etc.clientlibs/YOUR-PROJECT/clientlibs/clientlib-react/resources/assets/main.css" 
+          href="/etc.clientlibs/aemcs-nbc-sites/clientlibs/clientlib-react/resources/assets/main.css" 
           type="text/css">
 </sly>
 ```
