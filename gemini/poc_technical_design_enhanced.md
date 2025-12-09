@@ -17,7 +17,12 @@
 6. [Build Pipeline](#6-build-pipeline)
 7. [Component Lifecycle Diagrams](#7-component-lifecycle-diagrams)
 8. [Development Workflow](#8-development-workflow)
-9. [Glossary](#9-glossary)
+9. [Wrapper Component Pattern](#9-wrapper-component-pattern)
+10. [Risks & Mitigations](#10-risks--mitigations)
+11. [Decision Log](#11-decision-log)
+12. [Limitations & Constraints](#12-limitations--constraints)
+13. [References](#13-references)
+14. [Glossary](#14-glossary)
 
 ---
 
@@ -850,7 +855,272 @@ mvn clean install -PautoInstallPackage
 
 ---
 
-## 9. Glossary
+## 9. Wrapper Component Pattern
+
+When integrating NBC Design System or UMA components within AEM, you create **wrapper components** that serve as adapters between AEM's dialog configuration and the design system component's props interface.
+
+### Why Wrappers?
+
+| Challenge | Solution |
+|-----------|----------|
+| AEM dialogs output JSON strings | Wrapper parses and transforms to typed props |
+| Design system expects specific prop names | Wrapper maps AEM field names to DS prop names |
+| Design system has required props | Wrapper provides defaults for optional AEM fields |
+| Multiple DS components per widget | Wrapper composes components together |
+
+### Example: NBC Button Wrapper
+
+```jsx
+// ui.frontend/src/components/NBCButton/index.jsx
+import { Button } from '@nbc/design-system';
+
+/**
+ * AEM Wrapper for NBC Design System Button
+ * 
+ * AEM Dialog fields → Wrapper → NBC Design System props
+ * 
+ * @param {Object} props - Props from AEM data-props attribute
+ * @param {string} props.buttonLabel - Button text (from AEM dialog)
+ * @param {string} props.buttonVariant - 'primary' | 'secondary' | 'ghost'
+ * @param {string} props.buttonLink - URL to navigate to
+ * @param {string} props.buttonSize - 'small' | 'medium' | 'large'
+ * @param {boolean} props.openInNewTab - Whether to open in new window
+ */
+export default function NBCButton({
+  buttonLabel,
+  buttonVariant = 'primary',
+  buttonLink,
+  buttonSize = 'medium',
+  openInNewTab = false,
+  ...restProps
+}) {
+  // Transform AEM props to NBC Design System props
+  const handleClick = () => {
+    if (buttonLink) {
+      window.open(buttonLink, openInNewTab ? '_blank' : '_self');
+    }
+  };
+
+  return (
+    <Button
+      variant={buttonVariant}
+      size={buttonSize}
+      onClick={handleClick}
+      {...restProps}
+    >
+      {buttonLabel}
+    </Button>
+  );
+}
+```
+
+### Example: Complex Card Wrapper
+
+```jsx
+// ui.frontend/src/components/NBCCard/index.jsx
+import { Card, CardMedia, CardContent, Typography, Button } from '@nbc/design-system';
+
+/**
+ * AEM Wrapper for NBC Design System Card
+ * Composes multiple design system components into a single widget
+ */
+export default function NBCCard({
+  // AEM dialog props
+  title,
+  description,
+  imageUrl,
+  imagePath,        // Could come from AEM DAM reference
+  ctaLabel,
+  ctaLink,
+  cardVariant = 'elevated',
+}) {
+  // Handle both imageUrl (external) and imagePath (DAM)
+  const resolvedImage = imagePath || imageUrl;
+
+  return (
+    <Card variant={cardVariant}>
+      {resolvedImage && (
+        <CardMedia
+          image={resolvedImage}
+          alt={title || 'Card image'}
+        />
+      )}
+      <CardContent>
+        {title && <Typography variant="h3">{title}</Typography>}
+        {description && <Typography variant="body1">{description}</Typography>}
+        {ctaLabel && ctaLink && (
+          <Button variant="text" href={ctaLink}>
+            {ctaLabel}
+          </Button>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+```
+
+### Registration
+
+```javascript
+// registry.js
+export const registry = {
+  'NBCButton': lazy(() => import('./components/NBCButton')),
+  'NBCCard': lazy(() => import('./components/NBCCard')),
+  // ... other wrappers
+};
+```
+
+---
+
+## 10. Risks & Mitigations
+
+| Risk | Severity | Likelihood | Mitigation |
+|------|----------|------------|------------|
+| **React bundle size impacts Core Web Vitals** | High | Medium | Vendor splitting (React core cached separately), lazy loading per component, skip loading when no widgets exist on page |
+| **Widget error crashes entire page** | High | Low | Each widget wrapped in `ErrorBoundary` for fault isolation; only affected widget fails |
+| **NBC Design System version conflicts** | Medium | Medium | Pin exact versions in `package.json`, test DS upgrades in dev before deploying, maintain changelog of DS updates |
+| **Memory leaks from unmounted widgets** | Medium | Medium | `MutationObserver` detects DOM removal and unmounts React roots; `WeakMap` for tracking roots prevents stale references |
+| **AEM author edits break React widget** | Medium | Low | WCM mode detection renders placeholder in Edit mode; full widget only in Preview/Publish |
+| **CORS issues with external APIs** | Medium | Low | Configure AEM Dispatcher to proxy API requests, or use relative paths for internal APIs |
+| **Lazy-loaded chunk fails to load** | Low | Low | `Suspense` fallback shows loading state; `ErrorBoundary` catches module load errors |
+| **Build tool (Vite) breaking changes** | Low | Low | Lock Vite version, test upgrades in isolation, maintain build configuration documentation |
+| **Browser compatibility with ES Modules** | Low | Low | ES Modules supported in all modern browsers (Chrome 61+, Firefox 60+, Safari 10.1+, Edge 16+); no IE11 support |
+
+### Risk Monitoring
+
+- **Performance:** Monitor Lighthouse scores, Core Web Vitals in production
+- **Errors:** Integrate with error tracking service (Sentry, DataDog) to capture widget failures
+- **Bundle Size:** Set up CI alerts if JS bundle exceeds threshold (e.g., 100KB gzipped)
+
+---
+
+## 11. Decision Log
+
+This section documents key architectural decisions made during the POC, including alternatives considered and rationale.
+
+### Decision 1: Multi-Root Mounting vs. React Portals
+
+| Aspect | React Portals | Multi-Root Mounting (Selected) |
+|--------|---------------|-------------------------------|
+| **Architecture** | Single React root, portal to multiple DOM nodes | Independent React root per widget |
+| **Fault Isolation** | ❌ One error crashes all portals | ✅ Error contained to single widget |
+| **Bundle Loading** | All components loaded upfront | ✅ Lazy load per-component chunks |
+| **Complexity** | Higher (portal management) | ✅ Simpler (standard createRoot) |
+| **DOM Events** | Events bubble through React tree (unexpected) | ✅ Events bubble through DOM tree |
+
+**Decision:** Multi-Root Mounting for fault isolation and lazy loading benefits.
+
+### Decision 2: Build Tool - Vite vs. Webpack
+
+| Aspect | Webpack | Vite (Selected) |
+|--------|---------|-----------------|
+| **Dev Server Start** | 30-60 seconds (large projects) | ✅ <1 second (native ESM) |
+| **HMR Speed** | 1-3 seconds | ✅ <100ms |
+| **Configuration** | Complex, verbose | ✅ Minimal, convention-based |
+| **ES Module Support** | Requires configuration | ✅ Native |
+| **Production Build** | Webpack bundler | Rollup (mature, tree-shaking) |
+| **AEM Archetype Default** | ✅ Included | Requires custom setup |
+
+**Decision:** Vite for developer experience and modern ESM support, despite requiring custom AEM integration.
+
+### Decision 3: ES Module Loading Strategy
+
+| Approach | Description | Verdict |
+|----------|-------------|---------|
+| **Transpile to IIFE** | Convert ESM to browser-compatible format | ❌ Loses code-splitting benefits |
+| **AEM SPA Editor** | Full SPA integration with AEM | ❌ Overkill for widget use case, complex setup |
+| **Resource + Loader Pattern** | Standard JS loader injects `<script type="module">` | ✅ Preserves ESM benefits, minimal AEM changes |
+
+**Decision:** Resource + Loader pattern balances ES Module benefits with AEM compatibility.
+
+### Decision 4: Shared State Between Widgets
+
+| Approach | Notes | Verdict |
+|----------|-------|---------|
+| **Global Redux Store** | Single store shared across all widgets | ❌ Tight coupling, defeats isolation |
+| **Context per Widget** | Each widget has own context | ✅ Isolation maintained |
+| **Event-Based Communication** | CustomEvents for rare cross-widget needs | ✅ Loose coupling when needed |
+
+**Decision:** Widgets are isolated by default; use CustomEvents for rare cross-widget communication.
+
+---
+
+## 12. Limitations & Constraints
+
+This architecture has intentional limitations. Understanding these helps set proper expectations.
+
+### What This Architecture Cannot Do
+
+| Limitation | Reason | Workaround |
+|------------|--------|------------|
+| **No Server-Side Rendering (SSR)** | Would require Node.js infrastructure; AEM handles initial render | AEM renders static skeleton/placeholder; React hydrates on client |
+| **React cannot control `<head>`** | AEM owns SEO meta tags, title, canonical URLs | Use AEM for all SEO metadata; React manages only widget content |
+| **No routing inside widgets** | Widgets are isolated; page navigation owned by AEM | For multi-view widgets, use internal state, not URL routing |
+| **Initial hydration delay** | JavaScript must load before interactivity | Minimize with preload hints, lazy loading, vendor caching |
+| **IE11 not supported** | ES Modules not supported in IE11 | IE11 end-of-life (June 2022); no modern support needed |
+| **Authors must preview to test** | Edit mode shows placeholder only | By design to prevent edit overlay conflicts |
+| **Widget state not persisted** | React state resets on page navigation | Use localStorage/sessionStorage if state persistence needed |
+| **Complex global state is harder** | Widgets are independent roots | Design widgets to be self-contained; API data via props |
+
+### Performance Trade-offs
+
+| Trade-off | Impact | Mitigation |
+|-----------|--------|------------|
+| Additional JavaScript download | ~45KB (React core) + widget code | Vendor splitting, long-term caching, lazy loading |
+| Time to Interactive (TTI) increased | +50-200ms depending on widget complexity | Preload hints, only load when widgets exist |
+| Bundle per widget | Multiple HTTP requests for lazy chunks | HTTP/2 handles parallel requests efficiently |
+
+### AEM Authoring Constraints
+
+| Constraint | Reason |
+|------------|--------|
+| Widgets show placeholder in Edit mode | Prevents React interactivity from blocking AEM edit overlays |
+| Props come only from `data-props` attribute | Consistent, testable data contract |
+| Component name must match registry key exactly | Case-sensitive lookup; use consistent naming conventions |
+
+---
+
+## 13. References
+
+### Official Documentation
+
+| Resource | Link |
+|----------|------|
+| **React 18 createRoot API** | [react.dev/reference/react-dom/client/createRoot](https://react.dev/reference/react-dom/client/createRoot) |
+| **React Error Boundaries** | [react.dev/reference/react/Component#catching-rendering-errors-with-an-error-boundary](https://react.dev/reference/react/Component#catching-rendering-errors-with-an-error-boundary) |
+| **React.lazy and Suspense** | [react.dev/reference/react/lazy](https://react.dev/reference/react/lazy) |
+| **Vite Documentation** | [vitejs.dev/guide/](https://vitejs.dev/guide/) |
+| **Vite Build Configuration** | [vitejs.dev/guide/build.html](https://vitejs.dev/guide/build.html) |
+| **AEM Client Libraries** | [experienceleague.adobe.com/docs/experience-manager-65/developing/introduction/clientlibs.html](https://experienceleague.adobe.com/docs/experience-manager-65/developing/introduction/clientlibs.html) |
+| **AEM HTL Specification** | [experienceleague.adobe.com/docs/experience-manager-htl/using/getting-started/getting-started.html](https://experienceleague.adobe.com/docs/experience-manager-htl/using/getting-started/getting-started.html) |
+| **AEM WCM Modes** | [experienceleague.adobe.com/docs/experience-manager-65/developing/components/components-basics.html](https://experienceleague.adobe.com/docs/experience-manager-65/developing/components/components-basics.html) |
+
+### Architectural Patterns
+
+| Resource | Link |
+|----------|------|
+| **Islands Architecture (Jason Miller)** | [jasonformat.com/islands-architecture/](https://jasonformat.com/islands-architecture/) |
+| **Micro Frontends** | [martinfowler.com/articles/micro-frontends.html](https://martinfowler.com/articles/micro-frontends.html) |
+| **Patterns.dev - Islands Architecture** | [patterns.dev/posts/islands-architecture](https://www.patterns.dev/posts/islands-architecture) |
+
+### Tools & Libraries
+
+| Resource | Link |
+|----------|------|
+| **aem-clientlib-generator** | [github.com/wcm-io-frontend/aem-clientlib-generator](https://github.com/wcm-io-frontend/aem-clientlib-generator) |
+| **AEM Vite (alternative integration)** | [aemvite.dev](https://aemvite.dev/) |
+| **Rollup (Vite's production bundler)** | [rollupjs.org](https://rollupjs.org/) |
+
+### Related Internal Documents
+
+| Document | Description |
+|----------|-------------|
+| `consolidated_implementation_guide.md` | Detailed implementation code and configuration |
+| `setup_checklist.md` | Step-by-step setup instructions |
+
+---
+
+## 14. Glossary
 
 | Term | Definition |
 |------|------------|
@@ -858,13 +1128,16 @@ mvn clean install -PautoInstallPackage
 | **Clientlib** | Client Library - AEM's mechanism for managing CSS/JS with dependencies |
 | **Error Boundary** | React component that catches JavaScript errors in child components and displays a fallback UI |
 | **HTL** | HTML Template Language - AEM's server-side templating (formerly Sightly) |
+| **Hydration** | Process of attaching JavaScript event handlers to server-rendered HTML |
 | **Islands Architecture** | Hybrid pattern: static HTML with interactive JavaScript "islands" |
 | **Loader Script** | The `loader.js` file that bridges AEM's standard script loading with ES Modules |
 | **Multi-Root Mounting** | Pattern where multiple independent React apps mount at specific DOM locations |
 | **NBC Design System** | Organization's design system package containing styled React components, design tokens, and patterns for consistent UI/UX across NBC platforms |
 | **Registry** | The `registry.js` file that maps component names to React components with lazy loading |
 | **Sling** | Apache Sling - RESTful web framework underlying AEM |
+| **Tree-shaking** | Dead code elimination during build, removing unused exports |
 | **UMA** | Unified Module Assembler - NBC's internal React component library for cross-platform consistency |
+| **Vendor Splitting** | Separating third-party libraries (React) into a separate bundle for optimal caching |
 | **Vite** | Modern JavaScript build tool using native ES Modules and Rollup for production builds |
 | **WCM Mode** | Web Content Management Mode - AEM's authoring state (edit/preview/disabled) |
 | **Widget** | Self-contained React component providing interactive functionality within an AEM page |
@@ -881,5 +1154,10 @@ The **React Integration Framework** provides a robust, maintainable solution for
 ✅ **Performance optimized:** Lazy loading, code splitting, vendor caching  
 ✅ **Developer friendly:** Modern tooling, clear conventions, fault isolation  
 ✅ **Author friendly:** Standard AEM dialogs, edit/preview support  
+✅ **Cross-platform reuse:** NBC Design System and UMA components via wrapper pattern
 
 This architecture is production-ready and scalable for enterprise AEM implementations.
+
+---
+
+*Document Version: 2.1 | Last Updated: December 2024*
