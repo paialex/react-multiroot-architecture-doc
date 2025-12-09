@@ -340,7 +340,6 @@ export default defineConfig({
         
         // Predictable naming for clientlib mapping
         entryFileNames: '[name].js',
-<<<<<<< HEAD
         chunkFileNames: '[name]-[hash].js',
         
         // Assets (CSS, images): predictable naming
@@ -348,20 +347,6 @@ export default defineConfig({
           if (assetInfo.name && assetInfo.name.endsWith('.css')) {
             return 'assets/[name][extname]';
           }
-=======
-        
-        // Chunks: include hash for cache busting (vendor-abc123.js)
-        chunkFileNames: '[name]-[hash].js',
-        
-        // Assets (CSS, images): predictable naming
-        // Using [name] without hash for CSS to make loader simpler
-        assetFileNames: (assetInfo) => {
-          // CSS files: predictable name without hash
-          if (assetInfo.name && assetInfo.name.endsWith('.css')) {
-            return 'assets/[name][extname]';
-          }
-          // Other assets: include hash for cache busting
->>>>>>> 11fdd3cc3b399c68880b7138ac228d1f00d83550
           return 'assets/[name]-[hash][extname]';
         },
       },
@@ -377,7 +362,6 @@ export default defineConfig({
 });
 ```
 
-<<<<<<< HEAD
 ### 4.5 NPM Scripts
 
 **File:** `ui.frontend/package.json`
@@ -407,9 +391,6 @@ export default defineConfig({
 ```
 
 ### 4.6 Build Output
-=======
-### 4.7 Build Output
->>>>>>> 11fdd3cc3b399c68880b7138ac228d1f00d83550
 
 After running `npm run build`, the `dist/` folder contains:
 
@@ -419,11 +400,7 @@ dist/
 ├── vendor-abc123.js           # React + ReactDOM (cached long-term)
 ├── ProductCard-def456.js      # Lazy-loaded component
 ├── assets/
-<<<<<<< HEAD
 │   ├── main.css               # All CSS (single file)
-=======
-│   ├── main.css               # All CSS including Tailwind (single file)
->>>>>>> 11fdd3cc3b399c68880b7138ac228d1f00d83550
 │   └── logo-xyz123.svg        # Static assets
 └── manifest.json              # Build manifest
 ```
@@ -656,15 +633,12 @@ First, create the loader script in your frontend module (NOT in ui.apps):
  * It dynamically injects:
  *   1. The React application as an ES Module
  *   2. The CSS stylesheet
-<<<<<<< HEAD
  * 
  * Features:
  *   - Handles versioned/minified AEM clientlib URLs
  *   - Skips loading if no widgets exist on the page
  *   - Adds preload hints for better performance
  *   - Prevents duplicate loading
-=======
->>>>>>> 11fdd3cc3b399c68880b7138ac228d1f00d83550
  * 
  * This file is part of the build process - do not use import/export syntax.
  */
@@ -675,7 +649,6 @@ First, create the loader script in your frontend module (NOT in ui.apps):
   // Configuration - Update these for your project
   // ============================================================================
   
-<<<<<<< HEAD
   var CLIENTLIB_NAME = 'clientlib-react';      // Your clientlib folder name
   var PROJECT_NAME = 'aemcs-nbc-sites';         // Your project name in /apps/
   var CSS_FILENAME = 'main.css';            // CSS filename (matches Vite output)
@@ -705,12 +678,6 @@ First, create the loader script in your frontend module (NOT in ui.apps):
     
     return false;
   }
-=======
-  var CLIENTLIB_NAME = 'clientlib-react';  // Your clientlib folder name
-  var PROJECT_NAME = 'my-project';          // Your project name in /apps/
-  var CSS_FILENAME = 'main.css';            // CSS filename (matches Vite output)
-  var JS_FILENAME = 'main.js';              // JS filename (matches Vite output)
->>>>>>> 11fdd3cc3b399c68880b7138ac228d1f00d83550
   
   // ============================================================================
   // Path Detection
@@ -791,7 +758,6 @@ First, create the loader script in your frontend module (NOT in ui.apps):
   }
   
   // ============================================================================
-<<<<<<< HEAD
   // Preload Hints (Performance Optimization)
   // ============================================================================
   
@@ -822,8 +788,6 @@ First, create the loader script in your frontend module (NOT in ui.apps):
   }
   
   // ============================================================================
-=======
->>>>>>> 11fdd3cc3b399c68880b7138ac228d1f00d83550
   // CSS Loading
   // ============================================================================
   
@@ -834,11 +798,7 @@ First, create the loader script in your frontend module (NOT in ui.apps):
     var cssPath = basePath + '/resources/assets/' + CSS_FILENAME;
     
     // Check if CSS is already loaded (prevent duplicates)
-<<<<<<< HEAD
     var existingLink = document.querySelector('link[href*="' + CSS_FILENAME + '"][rel="stylesheet"]');
-=======
-    var existingLink = document.querySelector('link[href*="' + CSS_FILENAME + '"]');
->>>>>>> 11fdd3cc3b399c68880b7138ac228d1f00d83550
     if (existingLink) {
       console.log('[React Loader] CSS already loaded, skipping.');
       return;
@@ -869,7 +829,6 @@ First, create the loader script in your frontend module (NOT in ui.apps):
   function loadScript(basePath) {
     var modulePath = basePath + '/resources/' + JS_FILENAME;
     
-<<<<<<< HEAD
     // Check if already loaded (prevent duplicates)
     var existingScript = document.querySelector('script[src*="' + JS_FILENAME + '"]');
     if (existingScript) {
@@ -877,8 +836,6 @@ First, create the loader script in your frontend module (NOT in ui.apps):
       return;
     }
     
-=======
->>>>>>> 11fdd3cc3b399c68880b7138ac228d1f00d83550
     console.log('[React Loader] Loading JS from:', modulePath);
     
     var script = document.createElement('script');
@@ -899,15 +856,12 @@ First, create the loader script in your frontend module (NOT in ui.apps):
   // ============================================================================
   
   function init() {
-<<<<<<< HEAD
     // Skip loading if no widgets exist on the page (performance optimization)
     if (!hasWidgetsOnPage()) {
       console.log('[React Loader] No widgets found on page, skipping React load.');
       return;
     }
     
-=======
->>>>>>> 11fdd3cc3b399c68880b7138ac228d1f00d83550
     var basePath = getClientlibBasePath();
     
     if (!basePath) {
@@ -916,7 +870,6 @@ First, create the loader script in your frontend module (NOT in ui.apps):
     }
     
     console.log('[React Loader] Clientlib base path:', basePath);
-<<<<<<< HEAD
     console.log('[React Loader] Widgets detected, loading React application...');
     
     // Add preload hints first (tells browser to start fetching early)
@@ -926,13 +879,6 @@ First, create the loader script in your frontend module (NOT in ui.apps):
     loadStyles(basePath);
     
     // Load JavaScript module
-=======
-    
-    // Load CSS first (non-blocking)
-    loadStyles(basePath);
-    
-    // Then load JavaScript module
->>>>>>> 11fdd3cc3b399c68880b7138ac228d1f00d83550
     loadScript(basePath);
   }
   
