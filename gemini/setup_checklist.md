@@ -324,7 +324,7 @@ export class ErrorBoundary extends React.Component {
 
 ```javascript
 /**
- * React Widget Loader (ESM Bridge)
+ * React Widget Loader (ESM Bridge + CSS Loader)
  * This file is part of the build process - do not use import/export syntax.
  */
 (function() {
@@ -333,12 +333,9 @@ export class ErrorBoundary extends React.Component {
   // ⚠️ UPDATE THESE FOR YOUR PROJECT
   var CLIENTLIB_NAME = 'clientlib-react';
   var PROJECT_NAME = 'YOUR-PROJECT';
+  var CSS_FILENAME = 'main.css';
+  var JS_FILENAME = 'main.js';
   
-  /**
-   * Resolve clientlib base path.
-   * Handles standard paths AND versioned/minified paths like:
-   * /etc.clientlibs/project/clientlibs/clientlib-react.[lc-hash].min.js
-   */
   function getClientlibBasePath() {
     var currentScript = document.currentScript;
     var src = currentScript ? currentScript.src : null;
@@ -359,17 +356,13 @@ export class ErrorBoundary extends React.Component {
     
     // Standard path: /clientlib-react/js/loader.js
     var standardMatch = pathname.match(new RegExp('(.*/' + CLIENTLIB_NAME + ')/js/'));
-    if (standardMatch) {
-      return url.origin + standardMatch[1];
-    }
+    if (standardMatch) return url.origin + standardMatch[1];
     
-    // Versioned path: /clientlib-react.[hash].min.js or /clientlib-react.min.js
+    // Versioned path: /clientlib-react.[hash].min.js
     var versionedMatch = pathname.match(new RegExp('(.*/' + CLIENTLIB_NAME + ')[\\.\\[]'));
-    if (versionedMatch) {
-      return url.origin + versionedMatch[1];
-    }
+    if (versionedMatch) return url.origin + versionedMatch[1];
     
-    // Fallback: find clientlib name in path
+    // Fallback
     var idx = pathname.indexOf('/' + CLIENTLIB_NAME);
     if (idx !== -1) {
       return url.origin + pathname.substring(0, idx + CLIENTLIB_NAME.length + 1);
@@ -378,22 +371,37 @@ export class ErrorBoundary extends React.Component {
     return '/etc.clientlibs/' + PROJECT_NAME + '/clientlibs/' + CLIENTLIB_NAME;
   }
   
-  function loadReactApp() {
-    var basePath = getClientlibBasePath();
-    var modulePath = basePath + '/resources/main.js';
+  function loadStyles(basePath) {
+    var cssPath = basePath + '/resources/assets/' + CSS_FILENAME;
+    if (document.querySelector('link[href*="' + CSS_FILENAME + '"]')) return;
     
-    console.log('[React Loader] Loading from:', modulePath);
+    console.log('[React Loader] Loading CSS:', cssPath);
+    var link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = cssPath;
+    link.onerror = function() { console.error('[React Loader] CSS failed:', cssPath); };
+    document.head.appendChild(link);
+  }
+  
+  function loadScript(basePath) {
+    var jsPath = basePath + '/resources/' + JS_FILENAME;
+    console.log('[React Loader] Loading JS:', jsPath);
     
     var script = document.createElement('script');
     script.type = 'module';
-    script.src = modulePath;
-    script.onerror = function() {
-      console.error('[React Loader] Failed to load:', modulePath);
-    };
+    script.src = jsPath;
+    script.onerror = function() { console.error('[React Loader] JS failed:', jsPath); };
     document.body.appendChild(script);
   }
   
-  loadReactApp();
+  function init() {
+    var basePath = getClientlibBasePath();
+    console.log('[React Loader] Base path:', basePath);
+    loadStyles(basePath);
+    loadScript(basePath);
+  }
+  
+  init();
 })();
 ```
 

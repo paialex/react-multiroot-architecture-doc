@@ -146,7 +146,100 @@ my-aem-project/
 
 ---
 
-## 4. Vite Build Configuration
+## 4. Vite Build Configuration with Tailwind CSS
+
+### 4.1 Install Dependencies
+
+```bash
+cd ui.frontend
+
+# Core dependencies
+npm install react react-dom
+
+# Build tools
+npm install -D vite @vitejs/plugin-react aem-clientlib-generator
+
+# Tailwind CSS and PostCSS
+npm install -D tailwindcss postcss autoprefixer
+```
+
+### 4.2 Initialize Tailwind CSS
+
+```bash
+npx tailwindcss init -p
+```
+
+This creates `tailwind.config.js` and `postcss.config.js`.
+
+### 4.3 Configure Tailwind
+
+**File:** `ui.frontend/tailwind.config.js`
+
+```javascript
+/** @type {import('tailwindcss').Config} */
+export default {
+  content: [
+    "./index.html",
+    "./src/**/*.{js,ts,jsx,tsx}",
+  ],
+  theme: {
+    extend: {
+      // Custom theme extensions
+      colors: {
+        'brand-primary': '#0066cc',
+        'brand-secondary': '#004999',
+      },
+    },
+  },
+  plugins: [],
+  
+  // Important: Prefix Tailwind classes to avoid conflicts with existing AEM styles
+  // Uncomment if needed:
+  // prefix: 'tw-',
+}
+```
+
+### 4.4 Create CSS Entry Point
+
+**File:** `ui.frontend/src/styles/main.css`
+
+```css
+/* Tailwind base, components, and utilities */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom component styles */
+@layer components {
+  .react-widget-container {
+    @apply min-h-[100px];
+  }
+  
+  .widget-skeleton {
+    @apply animate-pulse bg-gray-200 rounded;
+  }
+}
+
+/* Custom utility classes */
+@layer utilities {
+  .content-visibility-auto {
+    content-visibility: auto;
+  }
+}
+```
+
+### 4.5 Import CSS in Main Entry
+
+**File:** `ui.frontend/src/main.jsx` (add at the top)
+
+```javascript
+// Import CSS (will be extracted by Vite)
+import './styles/main.css';
+
+// ... rest of main.jsx
+```
+
+### 4.6 Vite Configuration
 
 **File:** `ui.frontend/vite.config.js`
 
@@ -162,12 +255,23 @@ export default defineConfig({
   // Without this, lazy-loaded chunks fail when served from /etc.clientlibs/...
   base: './',
   
+  // CSS configuration
+  css: {
+    // Enable CSS source maps in development
+    devSourcemap: true,
+    
+    // PostCSS config is auto-detected from postcss.config.js
+  },
+  
   build: {
     outDir: 'dist',
     emptyOutDir: true,
     
     // Generate manifest.json for debugging and potential future integrations
     manifest: true,
+    
+    // CSS code splitting - extract CSS into separate files
+    cssCodeSplit: false,  // false = single CSS file (recommended for AEM)
     
     rollupOptions: {
       input: {
@@ -177,20 +281,31 @@ export default defineConfig({
         // CRITICAL: Force ES Module format
         format: 'es',
         
-        // Vendor splitting: React core in separate chunk for long-term caching
+        // Manual chunks for long-term caching
         manualChunks: {
+          // React core libraries
           vendor: ['react', 'react-dom'],
+          // Add other large libraries here if needed
+          // scheduler: ['scheduler'],  // React internal
         },
         
         // Predictable naming for clientlib mapping
         // Entry files: no hash (main.js)
         entryFileNames: '[name].js',
         
-        // Chunks: include hash for cache busting (vendor-abc123.js, ProductCard-def456.js)
+        // Chunks: include hash for cache busting (vendor-abc123.js)
         chunkFileNames: '[name]-[hash].js',
         
-        // Assets (CSS, images): include hash
-        assetFileNames: 'assets/[name]-[hash].[ext]',
+        // Assets (CSS, images): predictable naming
+        // Using [name] without hash for CSS to make loader simpler
+        assetFileNames: (assetInfo) => {
+          // CSS files: predictable name without hash
+          if (assetInfo.name && assetInfo.name.endsWith('.css')) {
+            return 'assets/[name][extname]';
+          }
+          // Other assets: include hash for cache busting
+          return 'assets/[name]-[hash][extname]';
+        },
       },
     },
   },
@@ -204,7 +319,7 @@ export default defineConfig({
 });
 ```
 
-### 4.1 Build Output
+### 4.7 Build Output
 
 After running `npm run build`, the `dist/` folder contains:
 
@@ -213,11 +328,219 @@ dist/
 ├── main.js                    # Widget Engine (entry point)
 ├── vendor-abc123.js           # React + ReactDOM (cached long-term)
 ├── ProductCard-def456.js      # Lazy-loaded component
-├── Calculator-ghi789.js       # Another lazy-loaded component
 ├── assets/
-│   └── main-xyz123.css        # Combined CSS (if any)
+│   ├── main.css               # All CSS including Tailwind (single file)
+│   └── logo-xyz123.svg        # Static assets
 └── manifest.json              # Build manifest
 ```
+
+### 4.8 Making Tailwind Optional (R&D Toggle)
+
+For R&D and exploration phases, you may want to toggle Tailwind on/off without modifying code. Here are three approaches:
+
+#### Option A: Environment Variable (Recommended)
+
+**Step 1: Create two CSS entry files**
+
+**File:** `ui.frontend/src/styles/main.css` (minimal - always included)
+
+```css
+/* Base styles that are always needed */
+.react-widget-container {
+  min-height: 100px;
+}
+
+.widget-skeleton {
+  animation: skeleton-pulse 1.5s ease-in-out infinite;
+  background: #e0e0e0;
+  border-radius: 4px;
+}
+
+@keyframes skeleton-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+```
+
+**File:** `ui.frontend/src/styles/tailwind.css` (Tailwind - optional)
+
+```css
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Tailwind-specific component styles */
+@layer components {
+  .react-widget-container {
+    @apply min-h-[100px];
+  }
+  
+  .widget-skeleton {
+    @apply animate-pulse bg-gray-200 rounded;
+  }
+}
+```
+
+**Step 2: Conditional import in main.jsx**
+
+**File:** `ui.frontend/src/main.jsx`
+
+```javascript
+// Always import base styles
+import './styles/main.css';
+
+// Conditionally import Tailwind (set at build time)
+if (import.meta.env.VITE_USE_TAILWIND === 'true') {
+  import('./styles/tailwind.css');
+}
+
+// ... rest of main.jsx
+```
+
+**Step 3: Add npm scripts for toggling**
+
+**File:** `ui.frontend/package.json`
+
+```json
+{
+  "scripts": {
+    "dev": "vite",
+    "dev:tailwind": "VITE_USE_TAILWIND=true vite",
+    "build": "vite build",
+    "build:tailwind": "VITE_USE_TAILWIND=true vite build",
+    "build:clientlib": "vite build && clientlib --verbose",
+    "build:clientlib:tailwind": "VITE_USE_TAILWIND=true vite build && clientlib --verbose"
+  }
+}
+```
+
+**Usage:**
+
+```bash
+# Development WITHOUT Tailwind (lighter, faster)
+npm run dev
+
+# Development WITH Tailwind (R&D mode)
+npm run dev:tailwind
+
+# Production build WITHOUT Tailwind
+npm run build:clientlib
+
+# Production build WITH Tailwind
+npm run build:clientlib:tailwind
+```
+
+#### Option B: Separate Build Configurations
+
+Create different Vite config files for different modes:
+
+**File:** `ui.frontend/vite.config.js` (base, no Tailwind)
+
+```javascript
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+import path from 'path';
+
+export default defineConfig({
+  plugins: [react()],
+  base: './',
+  // ... rest of config (no PostCSS/Tailwind)
+});
+```
+
+**File:** `ui.frontend/vite.config.tailwind.js` (with Tailwind)
+
+```javascript
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+import tailwindcss from 'tailwindcss';
+import autoprefixer from 'autoprefixer';
+import path from 'path';
+
+export default defineConfig({
+  plugins: [react()],
+  base: './',
+  css: {
+    postcss: {
+      plugins: [tailwindcss(), autoprefixer()],
+    },
+  },
+  // ... rest of config
+});
+```
+
+**Usage:**
+
+```bash
+# Without Tailwind
+npm run build
+
+# With Tailwind
+vite build --config vite.config.tailwind.js
+```
+
+#### Option C: PostCSS Config Toggle
+
+**File:** `ui.frontend/postcss.config.js`
+
+```javascript
+const useTailwind = process.env.VITE_USE_TAILWIND === 'true';
+
+export default {
+  plugins: {
+    // Only include Tailwind if enabled
+    ...(useTailwind ? { tailwindcss: {} } : {}),
+    autoprefixer: {},
+  },
+};
+```
+
+**File:** `ui.frontend/src/styles/main.css`
+
+```css
+/* These will only work if Tailwind is enabled */
+/* Otherwise they're just comments that get stripped */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Fallback styles that work without Tailwind */
+.react-widget-container {
+  min-height: 100px;
+}
+```
+
+### 4.9 Tailwind vs No-Tailwind Comparison
+
+| Aspect | Without Tailwind | With Tailwind |
+|--------|------------------|---------------|
+| CSS Bundle Size | ~5-10KB | ~30-100KB (purged) |
+| Build Time | Faster | Slightly slower |
+| Development | Traditional CSS | Utility-first |
+| Use Case | Production, minimal styles | R&D, rapid prototyping |
+| Command | `npm run build:clientlib` | `npm run build:clientlib:tailwind` |
+
+### 4.10 Recommended Workflow
+
+```
+Development Cycle:
+┌─────────────────────────────────────────────────────────┐
+│                                                          │
+│  🔬 R&D Phase        →   📦 Stabilization   →   🚀 Prod │
+│  (Tailwind ON)           (Extract styles)       (OFF)   │
+│                                                          │
+│  npm run dev:tailwind    Convert utility      npm run   │
+│                          classes to custom    build:    │
+│                          CSS modules          clientlib │
+│                                                          │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Workflow:**
+
+1. **R&D Phase:** Use `npm run dev:tailwind` for rapid prototyping
+2. **Stabilization:** Once design is finalized, extract Tailwind utilities to custom CSS
+3. **Production:** Build without Tailwind for smaller bundles
 
 ---
 
@@ -233,11 +556,12 @@ First, create the loader script in your frontend module (NOT in ui.apps):
 
 ```javascript
 /**
- * React Widget Loader (ESM Bridge)
+ * React Widget Loader (ESM Bridge + CSS Loader)
  * 
  * This script is loaded as a standard <script> tag by AEM Clientlibs.
- * Its purpose is to dynamically inject the actual React application
- * as an ES Module, which browsers can properly handle.
+ * It dynamically injects:
+ *   1. The React application as an ES Module
+ *   2. The CSS stylesheet
  * 
  * This file is part of the build process - do not use import/export syntax.
  */
@@ -250,6 +574,8 @@ First, create the loader script in your frontend module (NOT in ui.apps):
   
   var CLIENTLIB_NAME = 'clientlib-react';  // Your clientlib folder name
   var PROJECT_NAME = 'my-project';          // Your project name in /apps/
+  var CSS_FILENAME = 'main.css';            // CSS filename (matches Vite output)
+  var JS_FILENAME = 'main.js';              // JS filename (matches Vite output)
   
   // ============================================================================
   // Path Detection
@@ -330,13 +656,67 @@ First, create the loader script in your frontend module (NOT in ui.apps):
   }
   
   // ============================================================================
-  // Module Loading
+  // CSS Loading
+  // ============================================================================
+  
+  /**
+   * Inject the CSS stylesheet
+   */
+  function loadStyles(basePath) {
+    var cssPath = basePath + '/resources/assets/' + CSS_FILENAME;
+    
+    // Check if CSS is already loaded (prevent duplicates)
+    var existingLink = document.querySelector('link[href*="' + CSS_FILENAME + '"]');
+    if (existingLink) {
+      console.log('[React Loader] CSS already loaded, skipping.');
+      return;
+    }
+    
+    console.log('[React Loader] Loading CSS from:', cssPath);
+    
+    var link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.type = 'text/css';
+    link.href = cssPath;
+    
+    link.onerror = function() {
+      console.error('[React Loader] Failed to load CSS from:', cssPath);
+    };
+    
+    // Insert at the end of <head>
+    document.head.appendChild(link);
+  }
+  
+  // ============================================================================
+  // JavaScript Module Loading
   // ============================================================================
   
   /**
    * Inject the ES Module script
    */
-  function loadReactApp() {
+  function loadScript(basePath) {
+    var modulePath = basePath + '/resources/' + JS_FILENAME;
+    
+    console.log('[React Loader] Loading JS from:', modulePath);
+    
+    var script = document.createElement('script');
+    script.type = 'module';
+    script.src = modulePath;
+    
+    script.onerror = function() {
+      console.error('[React Loader] Failed to load React application from:', modulePath);
+      console.error('[React Loader] Detected base path was:', basePath);
+    };
+    
+    // Append to body (ensures DOM is available when module executes)
+    document.body.appendChild(script);
+  }
+  
+  // ============================================================================
+  // Main Initialization
+  // ============================================================================
+  
+  function init() {
     var basePath = getClientlibBasePath();
     
     if (!basePath) {
@@ -344,29 +724,17 @@ First, create the loader script in your frontend module (NOT in ui.apps):
       return;
     }
     
-    var modulePath = basePath + '/resources/main.js';
+    console.log('[React Loader] Clientlib base path:', basePath);
     
-    // Debug logging (remove in production if desired)
-    console.log('[React Loader] Loading from:', modulePath);
+    // Load CSS first (non-blocking)
+    loadStyles(basePath);
     
-    // Create and inject the module script
-    var script = document.createElement('script');
-    script.type = 'module';
-    script.src = modulePath;
-    
-    // Error handling
-    script.onerror = function() {
-      console.error('[React Loader] Failed to load React application from:', modulePath);
-      console.error('[React Loader] Detected base path was:', basePath);
-      console.error('[React Loader] Original script src:', document.currentScript ? document.currentScript.src : 'N/A');
-    };
-    
-    // Append to body (ensures DOM is available when module executes)
-    document.body.appendChild(script);
+    // Then load JavaScript module
+    loadScript(basePath);
   }
   
   // Execute immediately
-  loadReactApp();
+  init();
   
 })();
 ```
