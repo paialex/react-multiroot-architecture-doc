@@ -1,0 +1,874 @@
+# React Integration Framework for AEM: Technical Design Document
+
+> **Document Type:** POC Results & Architectural Recommendation  
+> **Version:** 2.0  
+> **Date:** December 2024  
+> **Status:** Approved for Implementation
+
+---
+
+## Table of Contents
+
+1. [Executive Summary](#1-executive-summary)
+2. [Problem Statement](#2-problem-statement)
+3. [The Core Challenge: ES Modules in AEM](#3-the-core-challenge-es-modules-in-aem)
+4. [Solution Architecture](#4-solution-architecture)
+5. [React Integration Framework](#5-react-integration-framework)
+6. [Build Pipeline](#6-build-pipeline)
+7. [Component Lifecycle Diagrams](#7-component-lifecycle-diagrams)
+8. [Development Workflow](#8-development-workflow)
+9. [Glossary](#9-glossary)
+
+---
+
+## 1. Executive Summary
+
+This document presents the findings from a Proof of Concept (POC) for integrating React.js into Adobe Experience Manager (AEM). The objective was to modernize frontend interactive capabilities while maintaining AEM's content management, performance, and SEO benefits.
+
+### Key Recommendation
+
+Adopt a **"Multi-Root Mounting Strategy"** (Islands Architecture) where:
+
+- AEM remains the **primary host** for page structure and content
+- React is **selectively mounted** as independent "islands" of interactivity
+- A custom **React Integration Framework** orchestrates the bridge between AEM and React
+
+### Technology Stack
+
+| Layer | Technology | Purpose |
+|-------|------------|---------|
+| Build Tool | **Vite** | Modern ES Module bundler with code-splitting |
+| UI Library | **React 18+** | Component-based interactive widgets |
+| Delivery | **AEM Clientlibs** | Asset management and dependency handling |
+| Bridge | **Custom Framework** | Discovers, loads, and mounts React components |
+
+---
+
+## 2. Problem Statement
+
+### Current State
+
+The platform relies on **Apache Sling** and **HTL** for server-side rendering, with interactivity handled via vanilla JavaScript and inline scripts.
+
+### Challenges
+
+| Challenge | Impact |
+|-----------|--------|
+| Complex state management | Error-prone "spaghetti code" for multi-step forms, dynamic filtering |
+| Developer experience | Legacy stack slows feature development; modern talent expects React |
+| Performance bottlenecks | Inefficient DOM manipulation degrades runtime performance |
+| Low reusability | JavaScript logic tightly coupled to specific DOM structures |
+
+### POC Goals
+
+✅ React components coexist within Sling-controlled pages  
+✅ Widgets configurable via standard AEM Dialogs  
+✅ Zero impact on critical rendering path of static content  
+✅ Works with AEM authoring experience (Edit/Preview modes)
+
+---
+
+## 3. The Core Challenge: ES Modules in AEM
+
+### The Problem
+
+Modern build tools (Vite, Rollup) output **ES Modules** with `import` statements:
+
+```javascript
+// Vite output (main.js)
+import React from './vendor-abc123.js';
+import { createRoot } from 'react-dom/client';
+```
+
+However, AEM Clientlibs generate **standard script tags**:
+
+```html
+<!-- AEM generates this -->
+<script src="/etc.clientlibs/project/clientlibs/clientlib-react/js/main.js"></script>
+```
+
+**Result:** Browser throws `SyntaxError: Cannot use import statement outside a module`
+
+### The Solution: Resource + Loader Pattern
+
+We solve this with a two-part approach:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Clientlib Structure                           │
+├─────────────────────────────────────────────────────────────────┤
+│  clientlib-react/                                                │
+│  ├── js/                                                         │
+│  │   └── loader.js          ← Standard JS (loaded by AEM)       │
+│  ├── js.txt                 ← Points to loader.js                │
+│  ├── resources/             ← ES Modules (served raw)           │
+│  │   ├── main.js            ← Widget Engine entry point          │
+│  │   ├── vendor-abc123.js   ← React/ReactDOM bundle              │
+│  │   └── ProductCard-def456.js ← Lazy-loaded component          │
+│  └── .content.xml                                                │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+| Part | Purpose |
+|------|---------|
+| **`loader.js`** | Standard JavaScript loaded by AEM. Dynamically injects `<script type="module">` |
+| **`resources/`** | Vite output stored in AEM's resources folder. Served raw, preserving relative imports |
+
+---
+
+## 4. Solution Architecture
+
+### Multi-Root Mounting Strategy (Islands Architecture)
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                        AEM Page (HTL Rendered)                       │
+├─────────────────────────────────────────────────────────────────────┤
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐               │
+│  │   Static     │  │   Static     │  │   Static     │               │
+│  │   Content    │  │   Content    │  │   Content    │               │
+│  │   (HTL)      │  │   (HTL)      │  │   (HTL)      │               │
+│  └──────────────┘  └──────────────┘  └──────────────┘               │
+│                                                                      │
+│  ┌──────────────┐                    ┌──────────────┐               │
+│  │ React Island │                    │ React Island │               │
+│  │  (Widget 1)  │                    │  (Widget 2)  │               │
+│  │  createRoot()│                    │  createRoot()│               │
+│  └──────────────┘                    └──────────────┘               │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Key Benefits
+
+| Benefit | Description |
+|---------|-------------|
+| **SEO Preserved** | AEM renders full HTML; React enhances, not replaces |
+| **Fault Isolation** | Each widget is an independent React root - one crash doesn't affect others |
+| **Lazy Loading** | Widget code downloaded only when component exists on page |
+| **Optimal Caching** | Vendor bundle (React core) separated from app code for long-term caching |
+| **Native Authoring** | Works with standard AEM dialogs and Page Editor |
+
+### Data Contract: AEM ↔ React
+
+Communication between AEM and React occurs via **data attributes**. This decoupling ensures React components can be tested in isolation.
+
+**AEM Component HTML Output (HTL):**
+
+```html
+<div 
+    class="react-widget-container"
+    data-widget-component="ProductCard" 
+    data-props='{"productId":"123", "theme":"dark", "showPrice":true}'>
+    <!-- Server-rendered skeleton for CLS optimization -->
+    <div class="skeleton-loader">Loading Product...</div>
+</div>
+```
+
+| Attribute | Purpose |
+|-----------|---------|
+| `data-widget-component` | Component name matching the registry key |
+| `data-props` | JSON-serialized props from AEM Dialog or Sling Model |
+
+---
+
+## 5. React Integration Framework
+
+The Integration Framework is the "glue" that connects AEM-rendered HTML to React applications. It consists of five core components working together.
+
+### Framework Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                 React Integration Framework                          │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐              │
+│  │  loader.js  │───►│  main.jsx   │───►│ registry.js │              │
+│  │ (ESM Bridge)│    │(Widget Eng.)│    │ (Component  │              │
+│  └─────────────┘    └──────┬──────┘    │   Map)      │              │
+│                            │            └─────────────┘              │
+│                            ▼                                         │
+│  ┌─────────────────────────────────────────────────────────────┐    │
+│  │                    React Components                          │    │
+│  │   ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐    │    │
+│  │   │ProductCard│  │Calculator│  │SearchBox │  │ Form... │    │    │
+│  │   └──────────┘  └──────────┘  └──────────┘  └──────────┘    │    │
+│  └─────────────────────────────────────────────────────────────┘    │
+│                                                                      │
+│  ┌─────────────────────────────────────────────────────────────┐    │
+│  │  ErrorBoundary (Fault Isolation for Each Widget Root)        │    │
+│  └─────────────────────────────────────────────────────────────┘    │
+│                                                                      │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### 5.1 Loader Script (`loader.js`) - The ESM Bridge
+
+**Purpose:** Bridges AEM's standard script loading with ES Modules.
+
+**Location:** `ui.frontend/src/loader.js`
+
+**What It Does:**
+
+1. **Detects its own path** using `document.currentScript`
+2. **Checks for widgets** on the page (skips loading if none found)
+3. **Handles AEM URL formats** including versioned/minified URLs
+4. **Injects ES Module script** with `<script type="module">`
+5. **Loads CSS** from the resources folder
+6. **Adds preload hints** for performance optimization
+
+**Key Code (Simplified):**
+
+```javascript
+/**
+ * React Widget Loader (ESM Bridge + CSS Loader)
+ * Features: Widget detection, preload hints, versioned URL handling
+ */
+(function() {
+  'use strict';
+  
+  // Configuration
+  var CLIENTLIB_NAME = 'clientlib-react';
+  var PROJECT_NAME = 'aemcs-nbc-sites';
+  var WIDGET_SELECTOR = '[data-widget-component]';
+  
+  // Skip if no widgets exist (performance optimization)
+  function hasWidgetsOnPage() {
+    if (document.querySelector(WIDGET_SELECTOR)) return true;
+    if (window.Granite && window.Granite.author) return true; // Always load in author
+    return false;
+  }
+  
+  function init() {
+    if (!hasWidgetsOnPage()) {
+      console.log('[React Loader] No widgets found, skipping load.');
+      return;
+    }
+    
+    var basePath = getClientlibBasePath();
+    
+    addPreloadHints(basePath);  // Performance optimization
+    loadStyles(basePath);        // Inject CSS
+    loadScript(basePath);        // Inject <script type="module">
+  }
+  
+  init();
+})();
+```
+
+---
+
+### 5.2 Widget Engine (`main.jsx`) - The Orchestrator
+
+**Purpose:** Discovers widget containers in the DOM and mounts React components.
+
+**Location:** `ui.frontend/src/main.jsx`
+
+**What It Does:**
+
+1. **Scans DOM** for elements with `data-widget-component`
+2. **Looks up components** in the registry
+3. **Parses JSON props** from `data-props` attribute
+4. **Detects WCM mode** (Edit vs Preview vs Published)
+5. **Creates React roots** for each widget with Error Boundaries
+6. **Handles cleanup** when DOM nodes are removed (memory leak prevention)
+7. **Supports lazy hydration** via IntersectionObserver
+
+**Key Code (Simplified):**
+
+```jsx
+import React, { Suspense } from 'react';
+import { createRoot } from 'react-dom/client';
+import { registry } from './registry';
+import { ErrorBoundary } from './utils/ErrorBoundary';
+
+const WIDGET_SELECTOR = '[data-widget-component]';
+const activeRoots = new WeakMap();
+
+function mountWidget(container) {
+  // Prevent double mounting
+  if (activeRoots.has(container)) return;
+  
+  const componentName = container.dataset.widgetComponent;
+  const Component = registry[componentName];
+  
+  if (!Component) {
+    console.warn(`Component "${componentName}" not in registry.`);
+    return;
+  }
+  
+  // Parse props safely
+  const props = JSON.parse(container.dataset.props || '{}');
+  
+  // Create isolated React root
+  const root = createRoot(container);
+  root.render(
+    <ErrorBoundary widgetName={componentName}>
+      <Suspense fallback={<div>Loading...</div>}>
+        <Component {...props} />
+      </Suspense>
+    </ErrorBoundary>
+  );
+  
+  activeRoots.set(container, root);
+}
+
+// Auto-initialize on DOM ready
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll(WIDGET_SELECTOR).forEach(mountWidget);
+});
+```
+
+---
+
+### 5.3 Component Registry (`registry.js`) - The Mapping
+
+**Purpose:** Maps string names (from AEM HTML) to actual React components.
+
+**Location:** `ui.frontend/src/registry.js`
+
+**What It Does:**
+
+1. **Centralizes component registration**
+2. **Enables code-splitting** via `React.lazy()`
+3. **Provides predictable lookup** for the Widget Engine
+
+**Code:**
+
+```javascript
+import { lazy } from 'react';
+
+/**
+ * Component Registry
+ * Maps data-widget-component values to React components.
+ * All components are lazy-loaded for optimal performance.
+ */
+export const registry = {
+  'ProductCard': lazy(() => import('./components/ProductCard')),
+  'Calculator': lazy(() => import('./components/Calculator')),
+  'SearchWidget': lazy(() => import('./components/SearchWidget')),
+  'MultiStepForm': lazy(() => import('./components/MultiStepForm')),
+};
+```
+
+---
+
+### 5.4 Error Boundary - Fault Isolation
+
+**Purpose:** Prevents one widget's error from crashing the entire page.
+
+**Location:** `ui.frontend/src/utils/ErrorBoundary.jsx`
+
+**Problem Solved:**
+
+Without Error Boundaries, a JavaScript error in any React component would:
+
+- Crash the entire React tree
+- Leave users with a blank or broken page
+
+With Error Boundaries:
+
+- Each widget is wrapped in its own boundary
+- Only the failing widget shows an error state
+- Other widgets continue functioning normally
+
+**Code:**
+
+```jsx
+import React from 'react';
+
+export class ErrorBoundary extends React.Component {
+  state = { hasError: false, error: null };
+  
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  
+  componentDidCatch(error, errorInfo) {
+    console.error(`[${this.props.widgetName}] Error:`, error, errorInfo);
+    // Send to error tracking service (e.g., Sentry)
+  }
+  
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="widget-error">
+          <p>Something went wrong with this component.</p>
+          <button onClick={() => this.setState({ hasError: false })}>
+            Try Again
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+```
+
+---
+
+### 5.5 Naming Convention: AEM ↔ React Contract
+
+The framework uses a strict **naming convention** to bridge AEM templates and React components:
+
+| AEM Side | React Side | Example |
+|----------|------------|---------|
+| `data-widget-component` attribute | Registry key | `"ProductCard"` |
+| `data-props` JSON attribute | Component props | `{"sku": "123"}` |
+| HTL variable from Sling Model | Serialized JSON | `${model.propsJson}` |
+
+**AEM HTL Template Example:**
+
+```html
+<sly data-sly-use.model="com.project.models.ProductCardModel">
+  <div class="react-widget-container"
+       data-widget-component="ProductCard"
+       data-props="${model.propsJson}">
+    <div class="skeleton-loader">Loading...</div>
+  </div>
+</sly>
+```
+
+**Sling Model Example:**
+
+```java
+@Model(adaptables = Resource.class)
+public class ProductCardModel {
+    
+    @ValueMapValue
+    private String productId;
+    
+    @ValueMapValue
+    private String theme;
+    
+    public String getPropsJson() {
+        // Convert authored values to JSON for React
+        return new JSONObject()
+            .put("productId", productId)
+            .put("theme", theme)
+            .toString();
+    }
+}
+```
+
+---
+
+## 6. Build Pipeline
+
+### 6.1 Vite - The Build Tool
+
+**What is Vite?**
+
+Vite is a modern JavaScript build tool that:
+
+- Uses **native ES Modules** in development for instant server start
+- Uses **Rollup** for production builds with tree-shaking
+- Provides **code-splitting** out of the box
+
+**Why Vite (not Webpack)?**
+
+| Aspect | Vite | Webpack |
+|--------|------|---------|
+| Dev Server Start | Milliseconds | 30+ seconds |
+| Hot Module Replacement | Instant | 1-2 seconds |
+| Build Time | Fast (Rollup) | Slower |
+| Configuration | Minimal | Complex |
+| ES Module Support | Native | Requires setup |
+
+**What We Configure in `vite.config.js`:**
+
+```javascript
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+import path from 'path';
+
+export default defineConfig({
+  plugins: [react()],
+  
+  // CRITICAL: Ensures dynamic imports use relative paths
+  base: './',
+  
+  build: {
+    outDir: 'dist',
+    manifest: true,
+    cssCodeSplit: false,  // Single CSS file
+    
+    rollupOptions: {
+      input: {
+        main: path.resolve(__dirname, 'src/main.jsx'),
+      },
+      output: {
+        format: 'es',
+        
+        // Vendor splitting for optimal caching
+        manualChunks: {
+          vendor: ['react', 'react-dom'],
+        },
+        
+        // Predictable naming
+        entryFileNames: '[name].js',
+        chunkFileNames: '[name]-[hash].js',
+      },
+    },
+  },
+});
+```
+
+**Data Flow Through Vite:**
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│                        VITE BUILD PROCESS                            │
+├──────────────────────────────────────────────────────────────────────┤
+│                                                                       │
+│   Source Files                    Transformations                     │
+│   ┌─────────────┐                                                    │
+│   │ main.jsx    │─┐                                                  │
+│   ├─────────────┤ │    ┌─────────────┐    ┌─────────────────────┐    │
+│   │ registry.js │─┼───►│    Vite     │───►│   Output (dist/)    │    │
+│   ├─────────────┤ │    │  + Rollup   │    │                     │    │
+│   │ Components/ │─┘    │             │    │ • main.js           │    │
+│   │   *.jsx     │      │ • JSX→JS    │    │ • vendor-[hash].js  │    │
+│   └─────────────┘      │ • Bundling  │    │ • [Component].js    │    │
+│                        │ • Splitting │    │ • assets/main.css   │    │
+│   ┌─────────────┐      │ • Minify    │    │ • manifest.json     │    │
+│   │ styles/     │─────►│ • CSS       │    │                     │    │
+│   │ main.css    │      └─────────────┘    └─────────────────────┘    │
+│   └─────────────┘                                                    │
+│                                                                       │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### 6.2 AEM Clientlib Generator (`clientlib.config.js`)
+
+**What is aem-clientlib-generator?**
+
+A Node.js tool that:
+
+- Copies build artifacts to AEM's clientlib folder structure
+- Generates `.content.xml` with correct JCR properties
+- Creates `js.txt` / `css.txt` manifests
+- Handles the `resources` folder for raw ES Modules
+
+**What We Configure:**
+
+```javascript
+const path = require('path');
+
+const BUILD_DIR = path.join(__dirname, 'dist');
+const STATIC_DIR = path.join(__dirname, 'src');
+const CLIENTLIB_DIR = path.join(
+  __dirname,
+  '../ui.apps/src/main/content/jcr_root/apps/aemcs-nbc-sites/clientlibs'
+);
+
+module.exports = {
+  clientLibRoot: CLIENTLIB_DIR,
+  
+  libs: [{
+    name: 'clientlib-react',
+    allowProxy: true,
+    categories: ['aemcs-nbc-sites.react'],
+    
+    // IMPORTANT: Disable AEM's processing (Vite already optimized)
+    jsProcessor: ['default:none', 'min:none'],
+    cssProcessor: ['default:none', 'min:none'],
+    
+    assets: {
+      // 1. Loader script → Standard 'js' folder (AEM loads this)
+      js: {
+        cwd: STATIC_DIR,
+        files: ['loader.js'],
+      },
+      
+      // 2. Vite output → 'resources' folder (served raw)
+      resources: {
+        cwd: BUILD_DIR,
+        files: ['**/*'],
+        flatten: false,
+      },
+    },
+  }],
+};
+```
+
+**How Vite and Clientlib Generator Connect:**
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      BUILD & DEPLOY PIPELINE                              │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                           │
+│   ui.frontend/src/                                                        │
+│   ├── main.jsx          ─┐                                               │
+│   ├── registry.js        │    ┌────────────┐     ┌────────────────┐     │
+│   ├── components/        ├───►│   Vite     │────►│   dist/        │     │
+│   └── loader.js         ─┘    │   Build    │     │   (ES Modules) │     │
+│                               └────────────┘     └───────┬────────┘     │
+│                                                          │               │
+│                                                          ▼               │
+│                                              ┌────────────────────────┐  │
+│   ui.frontend/src/loader.js ────────────────►│  aem-clientlib-        │  │
+│                                              │  generator             │  │
+│                                              └───────────┬────────────┘  │
+│                                                          │               │
+│                                                          ▼               │
+│   ui.apps/.../clientlibs/clientlib-react/                                │
+│   ├── js/loader.js       ← From src/loader.js                           │
+│   ├── js.txt             ← Generated                                     │
+│   ├── resources/         ← From dist/                                    │
+│   │   ├── main.js                                                        │
+│   │   ├── vendor-abc123.js                                               │
+│   │   └── assets/main.css                                                │
+│   └── .content.xml       ← Generated                                     │
+│                                                                           │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 7. Component Lifecycle Diagrams
+
+### 7.1 Build & Development Lifecycle
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    COMPONENT DEVELOPMENT LIFECYCLE                           │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│   ① DEVELOP                      ② BUILD                  ③ DEPLOY         │
+│   ───────────                    ─────                    ──────           │
+│                                                                              │
+│   ┌────────────────┐            ┌─────────────┐         ┌──────────────┐   │
+│   │ Create React   │            │ npm run     │         │ Maven Build  │   │
+│   │ Component      │───────────►│ build:      │────────►│ + Deploy     │   │
+│   │                │            │ clientlib   │         │ to AEM       │   │
+│   └────────────────┘            └─────────────┘         └──────────────┘   │
+│                                                                              │
+│   ┌────────────────┐                   │                                    │
+│   │ Add to         │                   │                                    │
+│   │ registry.js    │───────────────────┤                                    │
+│   └────────────────┘                   │                                    │
+│                                        │                                    │
+│   ┌────────────────┐                   │                                    │
+│   │ Create AEM     │                   │                                    │
+│   │ Component      │───────────────────┘                                    │
+│   │ (HTL + Dialog) │                                                        │
+│   └────────────────┘                                                         │
+│                                                                              │
+│   ④ AUTHOR                       ⑤ PREVIEW                ⑥ PUBLISH        │
+│   ────────                       ───────                  ───────          │
+│                                                                              │
+│   ┌────────────────┐            ┌─────────────┐         ┌──────────────┐   │
+│   │ Content Author │            │ Author      │         │ Dispatcher   │   │
+│   │ adds component │───────────►│ previews    │────────►│ serves       │   │
+│   │ via Page Editor│            │ functional  │         │ cached page  │   │
+│   └────────────────┘            │ widget      │         └──────────────┘   │
+│          │                      └─────────────┘                             │
+│          ▼                                                                   │
+│   ┌────────────────┐                                                         │
+│   │ Configure via  │                                                         │
+│   │ AEM Dialog     │                                                         │
+│   └────────────────┘                                                         │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### 7.2 Runtime Component Lifecycle (User Request to Render)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│              COMPONENT RUNTIME LIFECYCLE (Request to Pixel)                  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│   USER REQUEST                                                               │
+│   ┌──────────────┐                                                          │
+│   │   Browser    │                                                          │
+│   │ requests URL │                                                          │
+│   └──────┬───────┘                                                          │
+│          │                                                                   │
+│          ▼                                                                   │
+│   ┌──────────────────────────────────────────────────────────────────────┐  │
+│   │                         AEM SERVER                                    │  │
+│   │  ┌───────────────┐    ┌───────────────┐    ┌───────────────────────┐ │  │
+│   │  │ Sling         │───►│ HTL           │───►│ HTML Response         │ │  │
+│   │  │ Resolver      │    │ Renderer      │    │ (with widget         │ │  │
+│   │  │               │    │               │    │  containers)         │ │  │
+│   │  └───────────────┘    └───────────────┘    └──────────┬────────────┘ │  │
+│   └──────────────────────────────────────────────────────────────────────┘  │
+│                                                          │                   │
+│          ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─                  │
+│                                                          ▼                   │
+│   ┌──────────────────────────────────────────────────────────────────────┐  │
+│   │                         BROWSER                                       │  │
+│   │                                                                       │  │
+│   │  ① PARSE HTML                                                         │  │
+│   │  ┌─────────────────────────────────────────────────────────────────┐ │  │
+│   │  │  <div data-widget-component="ProductCard"                       │ │  │
+│   │  │        data-props='{"productId":"123"}'>                        │ │  │
+│   │  │    <div class="skeleton-loader">Loading...</div>  ← User sees  │ │  │
+│   │  │  </div>                                                         │ │  │
+│   │  └─────────────────────────────────────────────────────────────────┘ │  │
+│   │                              │                                        │  │
+│   │                              ▼                                        │  │
+│   │  ② LOAD CLIENTLIB                                                    │  │
+│   │  ┌─────────────────────────────────────────────────────────────────┐ │  │
+│   │  │  AEM loads <script src=".../js/loader.js">                      │ │  │
+│   │  │                              │                                  │ │  │
+│   │  │                              ▼                                  │ │  │
+│   │  │  loader.js detects widgets ────► Injects <script type="module"> │ │  │
+│   │  └─────────────────────────────────────────────────────────────────┘ │  │
+│   │                              │                                        │  │
+│   │                              ▼                                        │  │
+│   │  ③ WIDGET ENGINE INITIALIZES                                         │  │
+│   │  ┌─────────────────────────────────────────────────────────────────┐ │  │
+│   │  │  main.js (Widget Engine) loads                                  │ │  │
+│   │  │                              │                                  │ │  │
+│   │  │  Scans DOM for [data-widget-component] ─────────────┐          │ │  │
+│   │  │                              │                       │          │ │  │
+│   │  │                              ▼                       ▼          │ │  │
+│   │  │  Looks up "ProductCard" in registry.js ─► Lazy load chunk      │ │  │
+│   │  └─────────────────────────────────────────────────────────────────┘ │  │
+│   │                              │                                        │  │
+│   │                              ▼                                        │  │
+│   │  ④ REACT RENDERS                                                     │  │
+│   │  ┌─────────────────────────────────────────────────────────────────┐ │  │
+│   │  │  createRoot(container)                                          │ │  │
+│   │  │  render(<ProductCard productId="123" />)                        │ │  │
+│   │  │                              │                                  │ │  │
+│   │  │                              ▼                                  │ │  │
+│   │  │  React replaces skeleton with interactive component ────────────│ │  │
+│   │  │                                                 ▲               │ │  │
+│   │  │                                                 │               │ │  │
+│   │  │  User sees working ProductCard ─────────────────┘               │ │  │
+│   │  └─────────────────────────────────────────────────────────────────┘ │  │
+│   │                                                                       │  │
+│   └──────────────────────────────────────────────────────────────────────┘  │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### 7.3 Sequence Diagram
+
+```mermaid
+sequenceDiagram
+    participant User as User Browser
+    participant AEM as AEM Server
+    participant HTL as HTL Template
+    participant Loader as loader.js
+    participant Engine as Widget Engine
+    participant Registry as Registry
+    participant React as React Component
+
+    User->>AEM: Request page URL
+    AEM->>HTL: Resolve & render template
+    HTL-->>User: HTML with widget containers
+    
+    Note over User: User sees static content + skeletons
+    
+    User->>Loader: Load clientlib (loader.js)
+    Loader->>Loader: Check for [data-widget-component]
+    Loader->>Engine: Inject <script type="module">
+    
+    Engine->>Engine: DOMContentLoaded
+    Engine->>Engine: Scan DOM for widgets
+    
+    loop For each widget container
+        Engine->>Registry: Lookup component by name
+        Registry-->>Engine: Return lazy component
+        Engine->>React: createRoot() + render()
+        React-->>User: Interactive widget
+    end
+    
+    Note over User: User sees functional React components
+```
+
+---
+
+## 8. Development Workflow
+
+### Adding a New React Component
+
+**Step 1:** Create the React component
+
+```
+ui.frontend/src/components/MyWidget/
+├── index.jsx
+└── MyWidget.module.css
+```
+
+**Step 2:** Register in `registry.js`
+
+```javascript
+export const registry = {
+  // ... existing
+  'MyWidget': lazy(() => import('./components/MyWidget')),
+};
+```
+
+**Step 3:** Create AEM component
+
+```
+ui.apps/.../components/my-widget/
+├── _cq_dialog/
+│   └── .content.xml   # Author dialog
+├── my-widget.html     # HTL template
+└── .content.xml
+```
+
+**Step 4:** HTL template output
+
+```html
+<div class="react-widget-container"
+     data-widget-component="MyWidget"
+     data-props='${model.propsJson}'>
+  <div class="skeleton-loader">Loading...</div>
+</div>
+```
+
+**Step 5:** Build and deploy
+
+```bash
+cd ui.frontend
+npm run build:clientlib
+cd ..
+mvn clean install -PautoInstallPackage
+```
+
+---
+
+## 9. Glossary
+
+| Term | Definition |
+|------|------------|
+| **AEM** | Adobe Experience Manager - enterprise content management system |
+| **Clientlib** | Client Library - AEM's mechanism for managing CSS/JS with dependencies |
+| **HTL** | HTML Template Language - AEM's server-side templating (formerly Sightly) |
+| **Islands Architecture** | Hybrid pattern: static HTML with interactive JavaScript "islands" |
+| **Multi-Root Mounting** | Pattern where multiple independent React apps mount at specific DOM locations |
+| **Sling** | Apache Sling - RESTful web framework underlying AEM |
+| **Vite** | Modern JavaScript build tool using native ES Modules |
+| **WCM Mode** | Web Content Management Mode - AEM's authoring state (edit/preview/disabled) |
+| **Widget** | Self-contained React component providing interactive functionality |
+| **Widget Engine** | The main.jsx module that discovers and mounts React widgets |
+
+---
+
+## Conclusion
+
+The **React Integration Framework** provides a robust, maintainable solution for adding modern interactivity to AEM pages. By using the **Multi-Root Mounting Strategy** with a **Vite-based build pipeline**, we achieve:
+
+✅ **Best of both worlds:** AEM's SEO and authoring + React's interactivity  
+✅ **Performance optimized:** Lazy loading, code splitting, vendor caching  
+✅ **Developer friendly:** Modern tooling, clear conventions, fault isolation  
+✅ **Author friendly:** Standard AEM dialogs, edit/preview support  
+
+This architecture is production-ready and scalable for enterprise AEM implementations.
