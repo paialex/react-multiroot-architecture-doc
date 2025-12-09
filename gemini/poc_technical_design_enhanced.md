@@ -1111,13 +1111,6 @@ This architecture has intentional limitations. Understanding these helps set pro
 | **AEM Vite (alternative integration)** | [aemvite.dev](https://aemvite.dev/) |
 | **Rollup (Vite's production bundler)** | [rollupjs.org](https://rollupjs.org/) |
 
-### Related Internal Documents
-
-| Document | Description |
-|----------|-------------|
-| `consolidated_implementation_guide.md` | Detailed implementation code and configuration |
-| `setup_checklist.md` | Step-by-step setup instructions |
-
 ---
 
 ## 14. Glossary
@@ -1159,5 +1152,3 @@ The **React Integration Framework** provides a robust, maintainable solution for
 This architecture is production-ready and scalable for enterprise AEM implementations.
 
 ---
-
-*Document Version: 2.1 | Last Updated: December 2024*
