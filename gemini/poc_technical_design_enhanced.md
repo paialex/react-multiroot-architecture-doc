@@ -58,13 +58,31 @@ The platform relies on **Apache Sling** and **HTL** for server-side rendering, w
 | Developer experience | Legacy stack slows feature development; modern talent expects React |
 | Performance bottlenecks | Inefficient DOM manipulation degrades runtime performance |
 | Low reusability | JavaScript logic tightly coupled to specific DOM structures |
+| **Cross-platform component sharing** | Need to reuse components from NBC shared libraries (NBC Design System, UMA) across different platforms |
+
+### Cross-Platform Component Reuse Requirement
+
+A critical business requirement is the ability to **reuse React components from NBC shared libraries**:
+
+- **NBC Design System** - Organization's design system package containing styled React components, tokens, and patterns
+- **UMA (Unified Module Assembler)** - Internal React component library for cross-platform consistency
+
+These libraries provide:
+
+- ✅ Consistent UI/UX across multiple NBC platforms
+- ✅ Pre-built, tested components (buttons, forms, cards, etc.)
+- ✅ Design tokens (colors, typography, spacing)
+- ✅ Accessibility compliance built-in
+
+The integration framework must support importing and wrapping these shared components within AEM, acting as an **adapter layer** between AEM dialog configuration and the design system component expectations.
 
 ### POC Goals
 
 ✅ React components coexist within Sling-controlled pages  
 ✅ Widgets configurable via standard AEM Dialogs  
 ✅ Zero impact on critical rendering path of static content  
-✅ Works with AEM authoring experience (Edit/Preview modes)
+✅ Works with AEM authoring experience (Edit/Preview modes)  
+✅ **Enable reuse of NBC Design System and UMA components**
 
 ---
 
@@ -635,123 +653,110 @@ module.exports = {
 
 ### 7.1 Build & Development Lifecycle
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                    COMPONENT DEVELOPMENT LIFECYCLE                           │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│   ① DEVELOP                      ② BUILD                  ③ DEPLOY         │
-│   ───────────                    ─────                    ──────           │
-│                                                                              │
-│   ┌────────────────┐            ┌─────────────┐         ┌──────────────┐   │
-│   │ Create React   │            │ npm run     │         │ Maven Build  │   │
-│   │ Component      │───────────►│ build:      │────────►│ + Deploy     │   │
-│   │                │            │ clientlib   │         │ to AEM       │   │
-│   └────────────────┘            └─────────────┘         └──────────────┘   │
-│                                                                              │
-│   ┌────────────────┐                   │                                    │
-│   │ Add to         │                   │                                    │
-│   │ registry.js    │───────────────────┤                                    │
-│   └────────────────┘                   │                                    │
-│                                        │                                    │
-│   ┌────────────────┐                   │                                    │
-│   │ Create AEM     │                   │                                    │
-│   │ Component      │───────────────────┘                                    │
-│   │ (HTL + Dialog) │                                                        │
-│   └────────────────┘                                                         │
-│                                                                              │
-│   ④ AUTHOR                       ⑤ PREVIEW                ⑥ PUBLISH        │
-│   ────────                       ───────                  ───────          │
-│                                                                              │
-│   ┌────────────────┐            ┌─────────────┐         ┌──────────────┐   │
-│   │ Content Author │            │ Author      │         │ Dispatcher   │   │
-│   │ adds component │───────────►│ previews    │────────►│ serves       │   │
-│   │ via Page Editor│            │ functional  │         │ cached page  │   │
-│   └────────────────┘            │ widget      │         └──────────────┘   │
-│          │                      └─────────────┘                             │
-│          ▼                                                                   │
-│   ┌────────────────┐                                                         │
-│   │ Configure via  │                                                         │
-│   │ AEM Dialog     │                                                         │
-│   └────────────────┘                                                         │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph DEVELOP["① DEVELOP"]
+        A1[Create React Component<br/>or import from NBC Design System/UMA]
+        A2[Add to registry.js]
+        A3[Create AEM Component<br/>HTL + Dialog]
+    end
+    
+    subgraph BUILD["② BUILD"]
+        B1[npm run build:clientlib]
+        B2[Vite bundles React code]
+        B3[Clientlib generator<br/>copies to ui.apps]
+    end
+    
+    subgraph DEPLOY["③ DEPLOY"]
+        C1[Maven Build]
+        C2[Deploy to AEM]
+    end
+    
+    subgraph AUTHOR["④ AUTHOR"]
+        D1[Content Author adds<br/>component via Page Editor]
+        D2[Configure via AEM Dialog]
+    end
+    
+    subgraph PREVIEW["⑤ PREVIEW"]
+        E1[Author previews<br/>functional widget]
+    end
+    
+    subgraph PUBLISH["⑥ PUBLISH"]
+        F1[Dispatcher serves<br/>cached page]
+    end
+    
+    A1 --> B1
+    A2 --> B1
+    A3 --> B1
+    B1 --> B2 --> B3 --> C1 --> C2
+    C2 --> D1 --> D2 --> E1 --> F1
+    
+    style DEVELOP fill:#e1f5fe
+    style BUILD fill:#fff3e0
+    style DEPLOY fill:#f3e5f5
+    style AUTHOR fill:#e8f5e9
+    style PREVIEW fill:#fff8e1
+    style PUBLISH fill:#ffebee
 ```
 
 ---
 
 ### 7.2 Runtime Component Lifecycle (User Request to Render)
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│              COMPONENT RUNTIME LIFECYCLE (Request to Pixel)                  │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│   USER REQUEST                                                               │
-│   ┌──────────────┐                                                          │
-│   │   Browser    │                                                          │
-│   │ requests URL │                                                          │
-│   └──────┬───────┘                                                          │
-│          │                                                                   │
-│          ▼                                                                   │
-│   ┌──────────────────────────────────────────────────────────────────────┐  │
-│   │                         AEM SERVER                                    │  │
-│   │  ┌───────────────┐    ┌───────────────┐    ┌───────────────────────┐ │  │
-│   │  │ Sling         │───►│ HTL           │───►│ HTML Response         │ │  │
-│   │  │ Resolver      │    │ Renderer      │    │ (with widget         │ │  │
-│   │  │               │    │               │    │  containers)         │ │  │
-│   │  └───────────────┘    └───────────────┘    └──────────┬────────────┘ │  │
-│   └──────────────────────────────────────────────────────────────────────┘  │
-│                                                          │                   │
-│          ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─                  │
-│                                                          ▼                   │
-│   ┌──────────────────────────────────────────────────────────────────────┐  │
-│   │                         BROWSER                                       │  │
-│   │                                                                       │  │
-│   │  ① PARSE HTML                                                         │  │
-│   │  ┌─────────────────────────────────────────────────────────────────┐ │  │
-│   │  │  <div data-widget-component="ProductCard"                       │ │  │
-│   │  │        data-props='{"productId":"123"}'>                        │ │  │
-│   │  │    <div class="skeleton-loader">Loading...</div>  ← User sees  │ │  │
-│   │  │  </div>                                                         │ │  │
-│   │  └─────────────────────────────────────────────────────────────────┘ │  │
-│   │                              │                                        │  │
-│   │                              ▼                                        │  │
-│   │  ② LOAD CLIENTLIB                                                    │  │
-│   │  ┌─────────────────────────────────────────────────────────────────┐ │  │
-│   │  │  AEM loads <script src=".../js/loader.js">                      │ │  │
-│   │  │                              │                                  │ │  │
-│   │  │                              ▼                                  │ │  │
-│   │  │  loader.js detects widgets ────► Injects <script type="module"> │ │  │
-│   │  └─────────────────────────────────────────────────────────────────┘ │  │
-│   │                              │                                        │  │
-│   │                              ▼                                        │  │
-│   │  ③ WIDGET ENGINE INITIALIZES                                         │  │
-│   │  ┌─────────────────────────────────────────────────────────────────┐ │  │
-│   │  │  main.js (Widget Engine) loads                                  │ │  │
-│   │  │                              │                                  │ │  │
-│   │  │  Scans DOM for [data-widget-component] ─────────────┐          │ │  │
-│   │  │                              │                       │          │ │  │
-│   │  │                              ▼                       ▼          │ │  │
-│   │  │  Looks up "ProductCard" in registry.js ─► Lazy load chunk      │ │  │
-│   │  └─────────────────────────────────────────────────────────────────┘ │  │
-│   │                              │                                        │  │
-│   │                              ▼                                        │  │
-│   │  ④ REACT RENDERS                                                     │  │
-│   │  ┌─────────────────────────────────────────────────────────────────┐ │  │
-│   │  │  createRoot(container)                                          │ │  │
-│   │  │  render(<ProductCard productId="123" />)                        │ │  │
-│   │  │                              │                                  │ │  │
-│   │  │                              ▼                                  │ │  │
-│   │  │  React replaces skeleton with interactive component ────────────│ │  │
-│   │  │                                                 ▲               │ │  │
-│   │  │                                                 │               │ │  │
-│   │  │  User sees working ProductCard ─────────────────┘               │ │  │
-│   │  └─────────────────────────────────────────────────────────────────┘ │  │
-│   │                                                                       │  │
-│   └──────────────────────────────────────────────────────────────────────┘  │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph USER_REQUEST["USER REQUEST"]
+        U1[Browser requests URL]
+    end
+    
+    subgraph AEM_SERVER["AEM SERVER"]
+        S1[Sling Resolver]
+        S2[HTL Renderer]
+        S3[HTML Response<br/>with widget containers]
+        S1 --> S2 --> S3
+    end
+    
+    subgraph BROWSER["BROWSER"]
+        subgraph STEP1["① PARSE HTML"]
+            B1["Parse HTML<br/>User sees skeleton loader"]
+        end
+        
+        subgraph STEP2["② LOAD CLIENTLIB"]
+            B2["AEM loads loader.js"]
+            B3["loader.js detects widgets"]
+            B4["Injects script type=module"]
+            B2 --> B3 --> B4
+        end
+        
+        subgraph STEP3["③ WIDGET ENGINE"]
+            B5["main.js loads"]
+            B6["Scan DOM for<br/>data-widget-component"]
+            B7["Lookup in registry.js"]
+            B8["Lazy load component chunk"]
+            B5 --> B6 --> B7 --> B8
+        end
+        
+        subgraph STEP4["④ REACT RENDERS"]
+            B9["createRoot(container)"]
+            B10["render with ErrorBoundary"]
+            B11["User sees interactive widget"]
+            B9 --> B10 --> B11
+        end
+    end
+    
+    U1 --> S1
+    S3 --> B1
+    B1 --> B2
+    B4 --> B5
+    B8 --> B9
+    
+    style USER_REQUEST fill:#e3f2fd
+    style AEM_SERVER fill:#fff3e0
+    style BROWSER fill:#e8f5e9
+    style STEP1 fill:#f5f5f5
+    style STEP2 fill:#f5f5f5
+    style STEP3 fill:#f5f5f5
+    style STEP4 fill:#c8e6c9
 ```
 
 ---
@@ -851,14 +856,20 @@ mvn clean install -PautoInstallPackage
 |------|------------|
 | **AEM** | Adobe Experience Manager - enterprise content management system |
 | **Clientlib** | Client Library - AEM's mechanism for managing CSS/JS with dependencies |
+| **Error Boundary** | React component that catches JavaScript errors in child components and displays a fallback UI |
 | **HTL** | HTML Template Language - AEM's server-side templating (formerly Sightly) |
 | **Islands Architecture** | Hybrid pattern: static HTML with interactive JavaScript "islands" |
+| **Loader Script** | The `loader.js` file that bridges AEM's standard script loading with ES Modules |
 | **Multi-Root Mounting** | Pattern where multiple independent React apps mount at specific DOM locations |
+| **NBC Design System** | Organization's design system package containing styled React components, design tokens, and patterns for consistent UI/UX across NBC platforms |
+| **Registry** | The `registry.js` file that maps component names to React components with lazy loading |
 | **Sling** | Apache Sling - RESTful web framework underlying AEM |
-| **Vite** | Modern JavaScript build tool using native ES Modules |
+| **UMA** | Unified Module Assembler - NBC's internal React component library for cross-platform consistency |
+| **Vite** | Modern JavaScript build tool using native ES Modules and Rollup for production builds |
 | **WCM Mode** | Web Content Management Mode - AEM's authoring state (edit/preview/disabled) |
-| **Widget** | Self-contained React component providing interactive functionality |
-| **Widget Engine** | The main.jsx module that discovers and mounts React widgets |
+| **Widget** | Self-contained React component providing interactive functionality within an AEM page |
+| **Widget Engine** | The `main.jsx` module that discovers, mounts, and manages React widgets on the page |
+| **Wrapper Component** | React component that adapts NBC Design System or UMA components for AEM consumption, transforming dialog props to component props |
 
 ---
 
