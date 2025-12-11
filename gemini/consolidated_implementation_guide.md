@@ -350,6 +350,41 @@ First, create the loader script in your frontend module (NOT in ui.apps):
   // ============================================================================
   
   /**
+   * Helper function to read a cookie value by name.
+   */
+  function getCookie(name) {
+    var match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
+    return match ? match[2] : null;
+  }
+  
+  /**
+   * Detect if the page is in AEM Edit mode (not Preview).
+   * 
+   * Uses the "cq-editor-layer.page" cookie which AEM sets to indicate
+   * the current authoring layer. Possible values include:
+   *   - "Edit" : Author is editing the page
+   *   - "Preview" : Author is previewing the page
+   *   - "Annotate" : Author is in annotation mode
+   *   - "Developer" : Author is in developer mode
+   *   - Other possible values based on AEM version
+   * 
+   * If the cookie value is NOT "Preview", we consider it Edit mode
+   * where React should be loaded for dynamic component authoring.
+   */
+  function isInEditMode() {
+    var editorLayer = getCookie('cq-editor-layer.page');
+    
+    // If no cookie is set, check for Granite.author as fallback
+    if (!editorLayer) {
+      return !!(window.Granite && window.Granite.author);
+    }
+    
+    // In Preview mode, treat as publish-like (don't force React loading)
+    // Any other value (Edit, Annotate, Developer, etc.) = Edit mode
+    return editorLayer !== 'Preview';
+  }
+  
+  /**
    * Check if any React widgets exist on the page.
    * Skips loading React if no widgets are found (performance optimization).
    */
@@ -360,9 +395,9 @@ First, create the loader script in your frontend module (NOT in ui.apps):
     }
     
     // For pages that might add widgets dynamically via AEM author,
-    // always load in author mode
-    if (window.Granite && window.Granite.author) {
-      console.log('[React Loader] AEM Author mode detected, loading React.');
+    // always load in Edit mode (not Preview mode)
+    if (isInEditMode()) {
+      console.log('[React Loader] AEM Edit mode detected, loading React.');
       return true;
     }
     
