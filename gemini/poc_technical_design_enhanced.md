@@ -44,6 +44,7 @@ Adopt a **"Multi-Root Mounting Strategy"** (Islands Architecture) where:
 |-------|------------|---------|
 | Build Tool | **Vite** | Modern ES Module bundler with code-splitting |
 | UI Library | **React 18+** | Component-based interactive widgets |
+| Language | **TypeScript** | Type-safe development with full IDE support |
 | Delivery | **AEM Clientlibs** | Asset management and dependency handling |
 | Bridge | **Custom Framework** | Discovers, loads, and mounts React components |
 
@@ -283,11 +284,11 @@ The Integration Framework is the "glue" that connects AEM-rendered HTML to React
 
 ---
 
-### 5.2 Widget Engine (`main.jsx`) - The Orchestrator
+### 5.2 Widget Engine (`main.tsx`) - The Orchestrator
 
 **Purpose:** Discovers widget containers in the DOM and mounts React components.
 
-**Location:** `ui.frontend/src/main.jsx`
+**Location:** `ui.frontend/src/main.tsx`
 
 **What It Does:**
 
@@ -301,16 +302,17 @@ The Integration Framework is the "glue" that connects AEM-rendered HTML to React
 
 **Key Code (Simplified):**
 
-```jsx
+```tsx
 import React, { Suspense } from 'react';
-import { createRoot } from 'react-dom/client';
+import { createRoot, Root } from 'react-dom/client';
 import { registry } from './registry';
+import type { WidgetContainer, RootEntry } from './types/widget.types';
 import { ErrorBoundary } from './utils/ErrorBoundary';
 
 const WIDGET_SELECTOR = '[data-widget-component]';
-const activeRoots = new WeakMap();
+const activeRoots = new Map<WidgetContainer, RootEntry>();
 
-function mountWidget(container) {
+function mountWidget(container: WidgetContainer): void {
   // Prevent double mounting
   if (activeRoots.has(container)) return;
   
@@ -323,7 +325,7 @@ function mountWidget(container) {
   }
   
   // Parse props safely
-  const props = JSON.parse(container.dataset.props || '{}');
+  const props = JSON.parse(container.dataset.props || '{}') as Record<string, unknown>;
   
   // Create isolated React root
   const root = createRoot(container);
@@ -346,11 +348,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
 ---
 
-### 5.3 Component Registry (`registry.js`) - The Mapping
+### 5.3 Component Registry (`registry.ts`) - The Mapping
 
 **Purpose:** Maps string names (from AEM HTML) to actual React components.
 
-**Location:** `ui.frontend/src/registry.js`
+**Location:** `ui.frontend/src/registry.ts`
 
 **What It Does:**
 
@@ -360,15 +362,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
 **Code:**
 
-```javascript
+```typescript
 import { lazy } from 'react';
+import type { WidgetRegistry } from './types/widget.types';
 
 /**
  * Component Registry
  * Maps data-widget-component values to React components.
  * All components are lazy-loaded for optimal performance.
  */
-export const registry = {
+export const registry: WidgetRegistry = {
   'ProductCard': lazy(() => import('./components/ProductCard')),
   'Calculator': lazy(() => import('./components/Calculator')),
   'SearchWidget': lazy(() => import('./components/SearchWidget')),
@@ -382,7 +385,7 @@ export const registry = {
 
 **Purpose:** Prevents one widget's error from crashing the entire page.
 
-**Location:** `ui.frontend/src/utils/ErrorBoundary.jsx`
+**Location:** `ui.frontend/src/utils/ErrorBoundary.tsx`
 
 **Problem Solved:**
 
@@ -399,27 +402,37 @@ With Error Boundaries:
 
 **Code:**
 
-```jsx
-import React from 'react';
+```tsx
+import React, { Component, ErrorInfo, ReactNode } from 'react';
 
-export class ErrorBoundary extends React.Component {
-  state = { hasError: false, error: null };
+interface ErrorBoundaryProps {
+  widgetName: string;
+  children: ReactNode;
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  state: ErrorBoundaryState = { hasError: false, error: null };
   
-  static getDerivedStateFromError(error) {
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
     return { hasError: true, error };
   }
   
-  componentDidCatch(error, errorInfo) {
+  componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
     console.error(`[${this.props.widgetName}] Error:`, error, errorInfo);
     // Send to error tracking service (e.g., Sentry)
   }
   
-  render() {
+  render(): ReactNode {
     if (this.state.hasError) {
       return (
         <div className="widget-error">
           <p>Something went wrong with this component.</p>
-          <button onClick={() => this.setState({ hasError: false })}>
+          <button onClick={() => this.setState({ hasError: false, error: null })}>
             Try Again
           </button>
         </div>
@@ -500,9 +513,9 @@ Vite is a modern JavaScript build tool that:
 | Configuration | Minimal | Complex |
 | ES Module Support | Native | Requires setup |
 
-**What We Configure in `vite.config.js`:**
+**What We Configure in `vite.config.ts`:**
 
-```javascript
+```typescript
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
@@ -513,6 +526,14 @@ export default defineConfig({
   // CRITICAL: Ensures dynamic imports use relative paths
   base: './',
   
+  // Path aliases for cleaner imports
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname, './src'),
+      '@components': path.resolve(__dirname, './src/components'),
+    },
+  },
+  
   build: {
     outDir: 'dist',
     manifest: true,
@@ -520,7 +541,7 @@ export default defineConfig({
     
     rollupOptions: {
       input: {
-        main: path.resolve(__dirname, 'src/main.jsx'),
+        main: path.resolve(__dirname, 'src/main.tsx'),
       },
       output: {
         format: 'es',
@@ -548,17 +569,18 @@ export default defineConfig({
 │                                                                       │
 │   Source Files                    Transformations                     │
 │   ┌─────────────┐                                                    │
-│   │ main.jsx    │─┐                                                  │
+│   │ main.tsx    │─┐                                                  │
 │   ├─────────────┤ │    ┌─────────────┐    ┌─────────────────────┐    │
-│   │ registry.js │─┼───►│    Vite     │───►│   Output (dist/)    │    │
+│   │ registry.ts │─┼───►│    Vite     │───►│   Output (dist/)    │    │
 │   ├─────────────┤ │    │  + Rollup   │    │                     │    │
 │   │ Components/ │─┘    │             │    │ • main.js           │    │
-│   │   *.jsx     │      │ • JSX→JS    │    │ • vendor-[hash].js  │    │
+│   │   *.tsx     │      │ • TSX→JS    │    │ • vendor-[hash].js  │    │
 │   └─────────────┘      │ • Bundling  │    │ • [Component].js    │    │
-│                        │ • Splitting │    │ • assets/main.css   │    │
-│   ┌─────────────┐      │ • Minify    │    │ • manifest.json     │    │
-│   │ styles/     │─────►│ • CSS       │    │                     │    │
-│   │ main.css    │      └─────────────┘    └─────────────────────┘    │
+│   │ types/      │      │ • Splitting │    │ • assets/main.css   │    │
+│   │ *.types.ts  │      │ • Minify    │    │ • manifest.json     │    │
+│   ┌─────────────┐      │ • CSS       │    │                     │    │
+│   │ styles/     │─────►│             │    └─────────────────────┘    │
+│   │ main.css    │      └─────────────┘                               │
 │   └─────────────┘                                                    │
 │                                                                       │
 └──────────────────────────────────────────────────────────────────────┘
@@ -807,18 +829,21 @@ sequenceDiagram
 
 ### Adding a New React Component
 
-**Step 1:** Create the React component
+**Step 1:** Create the React component with TypeScript
 
 ```
 ui.frontend/src/components/MyWidget/
-├── index.jsx
+├── index.tsx
+├── MyWidget.types.ts
 └── MyWidget.module.css
 ```
 
-**Step 2:** Register in `registry.js`
+**Step 2:** Register in `registry.ts`
 
-```javascript
-export const registry = {
+```typescript
+import type { WidgetRegistry } from './types/widget.types';
+
+export const registry: WidgetRegistry = {
   // ... existing
   'MyWidget': lazy(() => import('./components/MyWidget')),
 };
@@ -870,21 +895,29 @@ When integrating NBC Design System or UMA components within AEM, you create **wr
 
 ### Example: NBC Button Wrapper
 
-```jsx
-// ui.frontend/src/components/NBCButton/index.jsx
-import { Button } from '@nbc/design-system';
+```tsx
+// ui.frontend/src/components/NBCButton/index.tsx
+import { Button, type ButtonProps } from '@nbc/design-system';
+import type { BaseWidgetProps } from '../../types/widget.types';
+
+type ButtonVariant = 'primary' | 'secondary' | 'ghost';
+type ButtonSize = 'small' | 'medium' | 'large';
+
+/**
+ * AEM props received from data-props attribute
+ */
+interface NBCButtonProps extends BaseWidgetProps {
+  buttonLabel: string;
+  buttonVariant?: ButtonVariant;
+  buttonLink?: string;
+  buttonSize?: ButtonSize;
+  openInNewTab?: boolean;
+}
 
 /**
  * AEM Wrapper for NBC Design System Button
  * 
  * AEM Dialog fields → Wrapper → NBC Design System props
- * 
- * @param {Object} props - Props from AEM data-props attribute
- * @param {string} props.buttonLabel - Button text (from AEM dialog)
- * @param {string} props.buttonVariant - 'primary' | 'secondary' | 'ghost'
- * @param {string} props.buttonLink - URL to navigate to
- * @param {string} props.buttonSize - 'small' | 'medium' | 'large'
- * @param {boolean} props.openInNewTab - Whether to open in new window
  */
 export default function NBCButton({
   buttonLabel,
@@ -893,9 +926,8 @@ export default function NBCButton({
   buttonSize = 'medium',
   openInNewTab = false,
   ...restProps
-}) {
-  // Transform AEM props to NBC Design System props
-  const handleClick = () => {
+}: NBCButtonProps): JSX.Element {
+  const handleClick = (): void => {
     if (buttonLink) {
       window.open(buttonLink, openInNewTab ? '_blank' : '_self');
     }
@@ -916,24 +948,39 @@ export default function NBCButton({
 
 ### Example: Complex Card Wrapper
 
-```jsx
-// ui.frontend/src/components/NBCCard/index.jsx
+```tsx
+// ui.frontend/src/components/NBCCard/index.tsx
 import { Card, CardMedia, CardContent, Typography, Button } from '@nbc/design-system';
+import type { BaseWidgetProps } from '../../types/widget.types';
+
+type CardVariant = 'elevated' | 'outlined' | 'filled';
+
+/**
+ * AEM props for the Card wrapper component
+ */
+interface NBCCardProps extends BaseWidgetProps {
+  title?: string;
+  description?: string;
+  imageUrl?: string;
+  imagePath?: string;  // Could come from AEM DAM reference
+  ctaLabel?: string;
+  ctaLink?: string;
+  cardVariant?: CardVariant;
+}
 
 /**
  * AEM Wrapper for NBC Design System Card
  * Composes multiple design system components into a single widget
  */
 export default function NBCCard({
-  // AEM dialog props
   title,
   description,
   imageUrl,
-  imagePath,        // Could come from AEM DAM reference
+  imagePath,
   ctaLabel,
   ctaLink,
   cardVariant = 'elevated',
-}) {
+}: NBCCardProps): JSX.Element {
   // Handle both imageUrl (external) and imagePath (DAM)
   const resolvedImage = imagePath || imageUrl;
 
@@ -961,9 +1008,12 @@ export default function NBCCard({
 
 ### Registration
 
-```javascript
-// registry.js
-export const registry = {
+```typescript
+// registry.ts
+import { lazy } from 'react';
+import type { WidgetRegistry } from './types/widget.types';
+
+export const registry: WidgetRegistry = {
   'NBCButton': lazy(() => import('./components/NBCButton')),
   'NBCCard': lazy(() => import('./components/NBCCard')),
   // ... other wrappers
@@ -1126,15 +1176,16 @@ This architecture has intentional limitations. Understanding these helps set pro
 | **Loader Script** | The `loader.js` file that bridges AEM's standard script loading with ES Modules |
 | **Multi-Root Mounting** | Pattern where multiple independent React apps mount at specific DOM locations |
 | **NBC Design System** | Organization's design system package containing styled React components, design tokens, and patterns for consistent UI/UX across NBC platforms |
-| **Registry** | The `registry.js` file that maps component names to React components with lazy loading |
+| **Registry** | The `registry.ts` file that maps component names to React components with lazy loading |
 | **Sling** | Apache Sling - RESTful web framework underlying AEM |
 | **Tree-shaking** | Dead code elimination during build, removing unused exports |
+| **TypeScript** | Typed superset of JavaScript that compiles to plain JavaScript, providing type safety and improved developer experience |
 | **UMA** | Unified Module Assembler - NBC's internal React component library for cross-platform consistency |
 | **Vendor Splitting** | Separating third-party libraries (React) into a separate bundle for optimal caching |
-| **Vite** | Modern JavaScript build tool using native ES Modules and Rollup for production builds |
+| **Vite** | Modern JavaScript/TypeScript build tool using native ES Modules and Rollup for production builds |
 | **WCM Mode** | Web Content Management Mode - AEM's authoring state (edit/preview/disabled) |
 | **Widget** | Self-contained React component providing interactive functionality within an AEM page |
-| **Widget Engine** | The `main.jsx` module that discovers, mounts, and manages React widgets on the page |
+| **Widget Engine** | The `main.tsx` module that discovers, mounts, and manages React widgets on the page |
 | **Wrapper Component** | React component that adapts NBC Design System or UMA components for AEM consumption, transforming dialog props to component props |
 
 ---
