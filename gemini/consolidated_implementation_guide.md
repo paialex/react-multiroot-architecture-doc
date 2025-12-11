@@ -69,7 +69,7 @@ Modern Vite builds output **ES Modules** with `import` statements:
 
 ```javascript
 // Vite output (main.js)
-import React from './vendor-abc123.js';
+import React from './react-abc123.js';
 import { createRoot } from 'react-dom/client';
 ```
 
@@ -99,7 +99,7 @@ We solve this with a two-part approach:
 │  ├── js.txt                 ← Points to loader.js                │
 │  ├── resources/             ← ES Modules (served raw)           │
 │  │   ├── main.js            ← Entry point                        │
-│  │   ├── vendor-abc123.js   ← React/ReactDOM                     │
+│  │   ├── react-abc123.js   ← React/ReactDOM                     │
 │  │   └── ProductCard-def456.js ← Lazy-loaded component          │
 │  └── .content.xml                                                │
 └─────────────────────────────────────────────────────────────────┘
@@ -113,18 +113,19 @@ We solve this with a two-part approach:
 my-aem-project/
 ├── ui.frontend/                          # Frontend module
 │   ├── src/
-│   │   ├── main.jsx                      # Widget Engine entry point
-│   │   ├── registry.js                   # Component registry
+│   │   ├── main.tsx                      # Widget Engine entry point
+│   │   ├── registry.ts                   # Component registry
 │   │   ├── components/
 │   │   │   ├── ProductCard/
-│   │   │   │   ├── index.jsx
+│   │   │   │   ├── index.tsx
 │   │   │   │   └── ProductCard.module.css
 │   │   │   └── Calculator/
-│   │   │       └── index.jsx
+│   │   │       └── index.tsx
 │   │   └── utils/
-│   │       └── ErrorBoundary.jsx
+│   │       └── ErrorBoundary.tsx
 │   ├── dist/                             # Vite build output
-│   ├── vite.config.js
+│   ├── vite.config.ts
+│   ├── tsconfig.json                     # TypeScript configuration
 │   ├── clientlib.config.js               # Clientlib generator config
 │   └── package.json
 │
@@ -186,20 +187,20 @@ npm install -D vite @vitejs/plugin-react aem-clientlib-generator
 
 ### 4.3 Import CSS in Main Entry
 
-**File:** `ui.frontend/src/main.jsx` (add at the top)
+**File:** `ui.frontend/src/main.tsx` (add at the top)
 
-```javascript
+```typescript
 // Import CSS (will be extracted by Vite)
 import './styles/main.css';
 
-// ... rest of main.jsx
+// ... rest of main.tsx
 ```
 
 ### 4.4 Vite Configuration
 
-**File:** `ui.frontend/vite.config.js`
+**File:** `ui.frontend/vite.config.ts`
 
-```javascript
+```typescript
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
@@ -222,7 +223,7 @@ export default defineConfig({
     
     rollupOptions: {
       input: {
-        main: path.resolve(__dirname, 'src/main.jsx'),
+        main: path.resolve(__dirname, 'src/main.tsx'),
       },
       output: {
         // CRITICAL: Force ES Module format
@@ -231,7 +232,7 @@ export default defineConfig({
         // Manual chunks for long-term caching
         manualChunks: {
           // React core libraries
-          vendor: ['react', 'react-dom'],
+          react: ['react', 'react-dom'],
           // Add other large libraries here if needed
           // scheduler: ['scheduler'],  // React internal
         },
@@ -250,14 +251,9 @@ export default defineConfig({
       },
     },
   },
-  
-  // Ensure .js files with JSX are processed correctly
-  esbuild: {
-    loader: 'jsx',
-    include: /src\/.*\.jsx?$/,
-    exclude: [],
-  },
 });
+```
+
 ```
 
 ### 4.5 NPM Scripts
@@ -295,7 +291,7 @@ After running `npm run build`, the `dist/` folder contains:
 ```
 dist/
 ├── main.js                    # Widget Engine (entry point)
-├── vendor-abc123.js           # React + ReactDOM (cached long-term)
+├── react-abc123.js           # React + ReactDOM (cached long-term)
 ├── ProductCard-def456.js      # Lazy-loaded component
 ├── assets/
 │   ├── main.css               # All CSS (single file)
@@ -694,7 +690,7 @@ If you prefer to handle this entirely in Vite, you can use a copy plugin:
 npm install -D vite-plugin-static-copy
 ```
 
-**Update vite.config.js:**
+**Update vite.config.ts:**
 
 ```javascript
 import { defineConfig } from 'vite';
@@ -752,13 +748,14 @@ With this configuration, `aem-clientlib-generator` will:
 ```
 ui.frontend/
 ├── src/
-│   ├── main.jsx              # Widget Engine entry point
+│   ├── main.tsx              # Widget Engine entry point
 │   ├── loader.js             # ESM Bridge (copied to clientlib/js/)
 │   ├── js.txt                # js.txt template (optional)
-│   ├── registry.js
+│   ├── registry.ts
 │   └── components/
 ├── dist/                     # Vite build output
-├── vite.config.js
+├── vite.config.ts
+├── tsconfig.json
 ├── clientlib.config.js
 └── package.json
 ```
@@ -889,11 +886,11 @@ function init() {
 
 ## 7. Widget Engine Implementation
 
-**File:** `ui.frontend/src/main.jsx`
+**File:** `ui.frontend/src/main.tsx`
 
-```jsx
-import React, { Suspense } from 'react';
-import { createRoot } from 'react-dom/client';
+```tsx
+import React, { Suspense, ReactElement } from 'react';
+import { createRoot, Root } from 'react-dom/client';
 import { registry } from './registry';
 import { ErrorBoundary } from './utils/ErrorBoundary';
 
@@ -901,7 +898,16 @@ import { ErrorBoundary } from './utils/ErrorBoundary';
 // Configuration
 // ============================================================================
 
-const CONFIG = {
+interface Config {
+  WIDGET_SELECTOR: string;
+  ATTR_COMPONENT: string;
+  ATTR_PROPS: string;
+  ATTR_MOUNTED: string;
+  ATTR_LAZY_HYDRATE: string;
+  DEFAULT_FALLBACK: ReactElement;
+}
+
+const CONFIG: Config = {
   // Selector for widget containers
   WIDGET_SELECTOR: '[data-widget-component]',
   
@@ -920,7 +926,7 @@ const CONFIG = {
 // ============================================================================
 
 // Track mounted roots for cleanup (prevents memory leaks)
-const activeRoots = new WeakMap();
+const activeRoots = new WeakMap<HTMLElement, Root>();
 
 // ============================================================================
 // WCM Mode Detection (AEM Authoring)
@@ -1190,10 +1196,22 @@ export { initWidgets, mountWidget, unmountWidget };
 
 ## 8. Component Registry
 
-**File:** `ui.frontend/src/registry.js`
+**File:** `ui.frontend/src/registry.ts`
 
-```javascript
-import { lazy } from 'react';
+```typescript
+import { lazy, LazyExoticComponent, ComponentType } from 'react';
+
+/**
+ * Type for a lazy-loaded component
+ */
+type LazyComponent = LazyExoticComponent<ComponentType<any>>;
+
+/**
+ * Widget Registry Type
+ */
+export interface WidgetRegistry {
+  [key: string]: LazyComponent;
+}
 
 /**
  * Component Registry
@@ -1204,7 +1222,7 @@ import { lazy } from 'react';
  * Usage in AEM component HTML:
  * <div data-widget-component="ProductCard" data-props='{"sku":"123"}'></div>
  */
-export const registry = {
+export const registry: WidgetRegistry = {
   // Product components
   'ProductCard': lazy(() => import('./components/ProductCard')),
   'ProductGallery': lazy(() => import('./components/ProductGallery')),
@@ -1222,16 +1240,19 @@ export const registry = {
  * Register a new component at runtime.
  * Useful for dynamically added components or testing.
  * 
- * @param {string} name - Component name
- * @param {React.ComponentType | Promise<{default: React.ComponentType}>} component - Component or dynamic import
+ * @param name - Component name
+ * @param component - Component or dynamic import
  */
-export function registerComponent(name, component) {
+export function registerComponent(
+  name: string, 
+  component: ComponentType<any> | LazyComponent
+): void {
   if (registry[name]) {
     console.warn(`[Registry] Overwriting existing component: ${name}`);
   }
-  registry[name] = typeof component === 'function' && component.$$typeof 
-    ? component 
-    : lazy(() => Promise.resolve({ default: component }));
+  registry[name] = 'then' in component 
+    ? component as LazyComponent
+    : lazy(() => Promise.resolve({ default: component as ComponentType<any> }));
 }
 ```
 
@@ -1384,7 +1405,7 @@ npm run build:clientlib
 # ui.apps/src/main/content/jcr_root/apps/my-project/clientlibs/clientlib-react/
 #   ├── resources/          (from Vite build)
 #   │   ├── main.js
-#   │   ├── vendor-abc123.js
+#   │   ├── react-abc123.js
 #   │   ├── ProductCard-def456.js
 #   │   └── assets/
 #   │       └── main-xyz123.css
@@ -1418,7 +1439,7 @@ After first clientlib generation, **manually create** these files (they won't be
 
 **Solution:**
 
-1. Ensure `base: './'` is in `vite.config.js`
+1. Ensure `base: './'` is in `vite.config.ts`
 2. Verify chunks are in the `resources/` folder
 3. Check browser Network tab for the attempted path
 
@@ -1429,7 +1450,7 @@ After first clientlib generation, **manually create** these files (they won't be
 **Solution:**
 
 1. Switch to Preview mode to see the full widget
-2. Or, modify the WCM mode check in `main.jsx` if you want full rendering in Edit mode
+2. Or, modify the WCM mode check in `main.tsx` if you want full rendering in Edit mode
 
 ### Issue: Memory leaks in Author mode
 
@@ -1453,7 +1474,7 @@ After first clientlib generation, **manually create** these files (they won't be
 
 ## Appendix A: Error Boundary Component
 
-**File:** `ui.frontend/src/utils/ErrorBoundary.jsx`
+**File:** `ui.frontend/src/utils/ErrorBoundary.tsx`
 
 ```jsx
 import React from 'react';
@@ -1792,7 +1813,7 @@ export function useWidgetEvent(eventName, callback) {
 **Usage in Components:**
 
 ```jsx
-// ProductCard.jsx - Emit event when product selected
+// ProductCard.tsx - Emit event when product selected
 import { emitWidgetEvent } from '../utils/widgetEvents';
 
 function ProductCard({ productId }) {
@@ -1803,7 +1824,7 @@ function ProductCard({ productId }) {
   return <button onClick={handleSelect}>Select</button>;
 }
 
-// ShoppingCart.jsx - Listen for product selection
+// ShoppingCart.tsx - Listen for product selection
 import { useWidgetEvent } from '../utils/widgetEvents';
 
 function ShoppingCart() {
@@ -2006,7 +2027,7 @@ Add to `package.json`:
 Or use Rollup plugin:
 
 ```javascript
-// vite.config.js
+// vite.config.ts
 import { visualizer } from 'rollup-plugin-visualizer';
 
 export default defineConfig({
@@ -2148,7 +2169,7 @@ global.adobeDataLayer = [];
 **Example Test:**
 
 ```jsx
-// src/components/ProductCard/ProductCard.test.jsx
+// src/components/ProductCard/ProductCard.test.tsx
 import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import ProductCard from './index';
@@ -2219,7 +2240,7 @@ describe('ProductCard Widget', () => {
 
 ### 17.3 Widget Engine Testing
 
-**File:** `ui.frontend/src/main.test.jsx`
+**File:** `ui.frontend/src/main.test.tsx`
 
 ```javascript
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -2454,7 +2475,7 @@ export async function fetchProduct(productId) {
 
 ### 20.1 Using react-intl
 
-**File:** `ui.frontend/src/i18n/IntlProvider.jsx`
+**File:** `ui.frontend/src/i18n/IntlProvider.tsx`
 
 ```jsx
 import React from 'react';
@@ -2493,7 +2514,7 @@ export function IntlProvider({ locale, children }) {
 **Wrapping widgets with IntlProvider:**
 
 ```jsx
-// In main.jsx, wrap each widget with IntlProvider
+// In main.tsx, wrap each widget with IntlProvider
 root.render(
   <React.StrictMode>
     <ErrorBoundary widgetName={componentName}>
@@ -2532,12 +2553,26 @@ props.put("locale", request.getLocale().toLanguageTag());
 
 When integrating external design system components (like NBC Design System or UMA), use wrapper components to adapt props:
 
-**File:** `ui.frontend/src/components/ProductCard/index.jsx`
+**File:** `ui.frontend/src/components/ProductCard/index.tsx`
 
-```jsx
+```tsx
 import React from 'react';
 // Import from external design system
 import { Card, Button, Typography } from '@nbc/design-system';
+
+/**
+ * Props interface for ProductCard
+ */
+interface ProductCardProps {
+  productId: string;
+  title: string;
+  price: number;
+  currency?: string;
+  theme?: 'light' | 'dark';
+  showAddToCart?: boolean;
+  locale?: string;
+  onAddToCart?: (productId: string) => void;
+}
 
 /**
  * ProductCard Wrapper
@@ -2554,13 +2589,13 @@ export default function ProductCard({
   locale = 'en-US',
   // Event handlers
   onAddToCart,
-}) {
+}: ProductCardProps): React.ReactElement {
   const formattedPrice = new Intl.NumberFormat(locale, {
     style: 'currency',
     currency,
   }).format(price);
   
-  const handleAddToCart = () => {
+  const handleAddToCart = (): void => {
     onAddToCart?.(productId);
   };
   
@@ -2592,15 +2627,24 @@ export default function ProductCard({
 
 ### 21.2 Theme Integration
 
-**File:** `ui.frontend/src/context/ThemeContext.jsx`
+**File:** `ui.frontend/src/context/ThemeContext.tsx`
 
-```jsx
-import React, { createContext, useContext } from 'react';
+```tsx
+import React, { createContext, useContext, ReactNode } from 'react';
 import { ThemeProvider as DesignSystemTheme } from '@nbc/design-system';
 
-const ThemeContext = createContext({ theme: 'light' });
+interface ThemeContextValue {
+  theme: 'light' | 'dark';
+}
 
-export function ThemeProvider({ theme = 'light', children }) {
+interface ThemeProviderProps {
+  theme?: 'light' | 'dark';
+  children: ReactNode;
+}
+
+const ThemeContext = createContext<ThemeContextValue>({ theme: 'light' });
+
+export function ThemeProvider({ theme = 'light', children }: ThemeProviderProps): React.ReactElement {
   return (
     <ThemeContext.Provider value={{ theme }}>
       <DesignSystemTheme mode={theme}>
@@ -2610,7 +2654,7 @@ export function ThemeProvider({ theme = 'light', children }) {
   );
 }
 
-export function useTheme() {
+export function useTheme(): ThemeContextValue {
   return useContext(ThemeContext);
 }
 ```
@@ -2621,9 +2665,9 @@ export function useTheme() {
 
 ### 22.1 Development Helpers
 
-**File:** `ui.frontend/src/utils/debug.js`
+**File:** `ui.frontend/src/utils/debug.ts`
 
-```javascript
+```typescript
 /**
  * Debug utilities for React widgets
  * Only active in development mode
@@ -2634,7 +2678,7 @@ const isDev = process.env.NODE_ENV === 'development';
 /**
  * Log widget lifecycle events
  */
-export function logWidgetEvent(widgetName, event, data = {}) {
+export function logWidgetEvent(widgetName: string, event: string, data: Record<string, unknown> = {}): void {
   if (isDev) {
     console.log(
       `%c[Widget: ${widgetName}]%c ${event}`,
@@ -2648,10 +2692,10 @@ export function logWidgetEvent(widgetName, event, data = {}) {
 /**
  * Expose widgets to window for debugging
  */
-export function exposeToWindow(name, value) {
+export function exposeToWindow(name: string, value: unknown): void {
   if (isDev) {
-    window.__REACT_WIDGETS__ = window.__REACT_WIDGETS__ || {};
-    window.__REACT_WIDGETS__[name] = value;
+    (window as any).__REACT_WIDGETS__ = (window as any).__REACT_WIDGETS__ || {};
+    (window as any).__REACT_WIDGETS__[name] = value;
   }
 }
 
@@ -2684,7 +2728,7 @@ export function WidgetDebugPanel({ widgetName, props }) {
 Add React DevTools support by ensuring development builds aren't stripped:
 
 ```javascript
-// vite.config.js
+// vite.config.ts
 export default defineConfig({
   define: {
     // Enable React DevTools in development

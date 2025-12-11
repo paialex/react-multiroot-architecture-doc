@@ -5,6 +5,8 @@
 > **Date:** December 2024  
 > **Status:** Approved for Implementation
 
+**⚠️ Important Note:** All code examples in this document should be considered as **pseudo-code** for illustrative purposes. They demonstrate the concepts and patterns but are not production-ready copy-paste solutions. Implementation details may vary based on project-specific requirements, AEM version, and organizational standards.
+
 ---
 
 ## Table of Contents
@@ -28,7 +30,16 @@
 
 ## 1. Executive Summary
 
-This document presents the findings from a Proof of Concept (POC) for integrating React.js into Adobe Experience Manager (AEM). The objective was to modernize frontend interactive capabilities while maintaining AEM's content management, performance, and SEO benefits.
+This document presents the findings from a Proof of Concept (POC) for integrating React.js into Adobe Experience Manager (AEM).
+
+### POC Objectives
+
+| Objective | Description |
+|-----------|-------------|
+| **Enable Component Reuse** | Leverage shared organizational libraries (NBC Design System, UMA) within AEM pages |
+| **Modern Interfaces** | Deliver more interactive, dynamic user experiences beyond traditional HTL capabilities |
+| **Accelerated Development** | Use React's component model for faster development, higher maintainability, and better abstraction |
+| **Preserve AEM Strengths** | Maintain AEM's content management, SEO, and authoring benefits |
 
 ### Key Recommendation
 
@@ -71,7 +82,7 @@ The platform relies on **Apache Sling** and **HTL** for server-side rendering, w
 A critical business requirement is the ability to **reuse React components from NBC shared libraries**:
 
 - **NBC Design System** - Organization's design system package containing styled React components, tokens, and patterns
-- **UMA (Unified Module Assembler)** - Internal React component library for cross-platform consistency
+- **UMA (Universal Modules Assembler)** - Internal React component library for cross-platform consistency
 
 These libraries provide:
 
@@ -94,13 +105,33 @@ The integration framework must support importing and wrapping these shared compo
 
 ## 3. The Core Challenge: ES Modules in AEM
 
+### AEM Clientlib Limitations
+
+AEM's clientlib system was designed for an earlier era of JavaScript development. While excellent for managing dependencies and concatenating files, it has fundamental limitations:
+
+- **No native ES Module support** - Clientlibs generate standard `<script>` tags without `type="module"`
+- **No dynamic imports** - Cannot leverage `import()` for code-splitting
+- **Concatenation model** - Designed for bundling, not for modern module resolution
+
+### Why ES Modules Matter
+
+ES Modules (ESM) bring significant advantages to modern JavaScript development:
+
+| Advantage | Description |
+|-----------|-------------|
+| **Tree-shaking** | Build tools can eliminate unused code, reducing bundle size |
+| **Code-splitting** | Load only the code needed for current page/interaction |
+| **Static analysis** | Better IDE support, type checking, and error detection |
+| **Native browser support** | Modern browsers execute ESM natively with proper scoping |
+| **Dependency resolution** | Relative imports work correctly without global namespace pollution |
+
 ### The Problem
 
 Modern build tools (Vite, Rollup) output **ES Modules** with `import` statements:
 
 ```javascript
 // Vite output (main.js)
-import React from './vendor-abc123.js';
+import React from './react-abc123.js';
 import { createRoot } from 'react-dom/client';
 ```
 
@@ -127,7 +158,7 @@ We solve this with a two-part approach:
 │  ├── js.txt                 ← Points to loader.js                │
 │  ├── resources/             ← ES Modules (served raw)           │
 │  │   ├── main.js            ← Widget Engine entry point          │
-│  │   ├── vendor-abc123.js   ← React/ReactDOM bundle              │
+│  │   ├── react-abc123.js   ← React/ReactDOM bundle              │
 │  │   └── ProductCard-def456.js ← Lazy-loaded component          │
 │  └── .content.xml                                                │
 └─────────────────────────────────────────────────────────────────┘
@@ -197,7 +228,16 @@ Communication between AEM and React occurs via **data attributes**. This decoupl
 
 ## 5. React Integration Framework
 
-The Integration Framework is the "glue" that connects AEM-rendered HTML to React applications. It consists of five core components working together.
+The Integration Framework is the \"glue\" that connects AEM-rendered HTML to React applications. It consists of five core components working together.
+
+### Key Benefits of the Framework
+
+| Benefit | Description |
+|---------|-------------|
+| **Standardization** | Provides a consistent approach to React integration across all AEM projects, enabling component reuse and shared patterns |
+| **Accelerated Development** | Developers can focus on component logic rather than integration plumbing—add components to the registry and they're ready for use |
+| **Portability** | Components developed for this framework can be reused across different AEM instances and projects |
+| **Reduced Complexity** | Abstracts the technical challenges of ES Module loading, making React adoption straightforward for development teams |
 
 ### Framework Architecture Overview
 
@@ -207,7 +247,7 @@ The Integration Framework is the "glue" that connects AEM-rendered HTML to React
 ├─────────────────────────────────────────────────────────────────────┤
 │                                                                      │
 │  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐              │
-│  │  loader.js  │───►│  main.jsx   │───►│ registry.js │              │
+│  │  loader.js  │───►│  main.tsx   │───►│ registry.ts │              │
 │  │ (ESM Bridge)│    │(Widget Eng.)│    │ (Component  │              │
 │  └─────────────┘    └──────┬──────┘    │   Map)      │              │
 │                            │            └─────────────┘              │
@@ -548,7 +588,7 @@ export default defineConfig({
         
         // Vendor splitting for optimal caching
         manualChunks: {
-          vendor: ['react', 'react-dom'],
+          react: ['react', 'react-dom'],
         },
         
         // Predictable naming
@@ -574,7 +614,7 @@ export default defineConfig({
 │   │ registry.ts │─┼───►│    Vite     │───►│   Output (dist/)    │    │
 │   ├─────────────┤ │    │  + Rollup   │    │                     │    │
 │   │ Components/ │─┘    │             │    │ • main.js           │    │
-│   │   *.tsx     │      │ • TSX→JS    │    │ • vendor-[hash].js  │    │
+│   │   *.tsx     │      │ • TSX→JS    │    │ • react-[hash].js   │    │
 │   └─────────────┘      │ • Bundling  │    │ • [Component].js    │    │
 │   │ types/      │      │ • Splitting │    │ • assets/main.css   │    │
 │   │ *.types.ts  │      │ • Minify    │    │ • manifest.json     │    │
@@ -643,35 +683,59 @@ module.exports = {
 
 **How Vite and Clientlib Generator Connect:**
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                      BUILD & DEPLOY PIPELINE                              │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                           │
-│   ui.frontend.react/src/                                                        │
-│   ├── main.jsx          ─┐                                               │
-│   ├── registry.js        │    ┌────────────┐     ┌────────────────┐     │
-│   ├── components/        ├───►│   Vite     │────►│   dist/        │     │
-│   └── loader.js         ─┘    │   Build    │     │   (ES Modules) │     │
-│                               └────────────┘     └───────┬────────┘     │
-│                                                          │               │
-│                                                          ▼               │
-│                                              ┌────────────────────────┐  │
-│   ui.frontend.react/src/loader.js ────────────────►│  aem-clientlib-        │  │
-│                                              │  generator             │  │
-│                                              └───────────┬────────────┘  │
-│                                                          │               │
-│                                                          ▼               │
-│   ui.apps/.../clientlibs/clientlib-react/                                │
-│   ├── js/loader.js       ← From src/loader.js                           │
-│   ├── js.txt             ← Generated                                     │
-│   ├── resources/         ← From dist/                                    │
-│   │   ├── main.js                                                        │
-│   │   ├── vendor-abc123.js                                               │
-│   │   └── assets/main.css                                                │
-│   └── .content.xml       ← Generated                                     │
-│                                                                           │
-└─────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph SOURCE["📁 ui.frontend.react/src/"]
+        S1[main.tsx]
+        S2[registry.ts]
+        S3[components/]
+        S4[loader.js]
+    end
+    
+    subgraph VITE["⚙️ Vite Build"]
+        V1[TypeScript Compilation]
+        V2[Bundling & Code-Splitting]
+        V3[Minification]
+    end
+    
+    subgraph DIST["📦 dist/ - ES Modules"]
+        D1[main.js]
+        D2[react-abc123.js]
+        D3[ProductCard-def456.js]
+        D4[assets/main.css]
+    end
+    
+    subgraph GENERATOR["🔧 aem-clientlib-generator"]
+        G1[Copy files to clientlib structure]
+        G2[Generate .content.xml]
+        G3[Generate js.txt]
+    end
+    
+    subgraph CLIENTLIB["📂 ui.apps/.../clientlib-react/"]
+        C1[js/loader.js]
+        C2[js.txt]
+        C3[resources/main.js]
+        C4[resources/react-abc123.js]
+        C5[resources/assets/main.css]
+        C6[.content.xml]
+    end
+    
+    S1 --> VITE
+    S2 --> VITE
+    S3 --> VITE
+    
+    VITE --> DIST
+    
+    DIST --> GENERATOR
+    S4 --> GENERATOR
+    
+    GENERATOR --> CLIENTLIB
+    
+    style SOURCE fill:#e3f2fd
+    style VITE fill:#fff3e0
+    style DIST fill:#e8f5e9
+    style GENERATOR fill:#f3e5f5
+    style CLIENTLIB fill:#ffebee
 ```
 
 ---
@@ -684,7 +748,7 @@ module.exports = {
 flowchart TB
     subgraph DEVELOP["① DEVELOP"]
         A1[Create React Component<br/>or import from NBC Design System/UMA]
-        A2[Add to registry.js]
+        A2[Add to registry.ts]
         A3[Create AEM Component<br/>HTL + Dialog]
     end
     
@@ -1083,15 +1147,18 @@ This section documents key architectural decisions made during the POC, includin
 
 **Decision:** Resource + Loader pattern balances ES Module benefits with AEM compatibility.
 
-### Decision 4: Shared State Between Widgets
+### Decision 4: Widget Isolation & State Management
+
+**Principle:** Each widget should be completely isolated—including its React context, state, and providers. Sharing state between widgets creates tight coupling and defeats the purpose of independent "islands."
 
 | Approach | Notes | Verdict |
 |----------|-------|---------|
-| **Global Redux Store** | Single store shared across all widgets | ❌ Tight coupling, defeats isolation |
-| **Context per Widget** | Each widget has own context | ✅ Isolation maintained |
-| **Event-Based Communication** | CustomEvents for rare cross-widget needs | ✅ Loose coupling when needed |
+| **Global Redux Store** | Single store shared across all widgets | ❌ Tight coupling, defeats isolation, single point of failure |
+| **Shared Context Provider** | Wrapping multiple widgets in shared context | ❌ Creates hidden dependencies between widgets |
+| **Context per Widget** | Each widget has its own isolated context tree | ✅ Full isolation maintained |
+| **Event-Based Communication** | CustomEvents for rare cross-widget needs | ✅ Loose coupling, explicit communication |
 
-**Decision:** Widgets are isolated by default; use CustomEvents for rare cross-widget communication.
+**Decision:** Widgets are fully isolated by default—each widget manages its own context, state, and providers independently. For rare cases requiring cross-widget communication, use browser CustomEvents for loose coupling.
 
 ---
 
@@ -1180,7 +1247,7 @@ This architecture has intentional limitations. Understanding these helps set pro
 | **Sling** | Apache Sling - RESTful web framework underlying AEM |
 | **Tree-shaking** | Dead code elimination during build, removing unused exports |
 | **TypeScript** | Typed superset of JavaScript that compiles to plain JavaScript, providing type safety and improved developer experience |
-| **UMA** | Unified Module Assembler - NBC's internal React component library for cross-platform consistency |
+| **UMA** | Universal Modules Assembler - NBC's internal React component library for cross-platform consistency |
 | **Vendor Splitting** | Separating third-party libraries (React) into a separate bundle for optimal caching |
 | **Vite** | Modern JavaScript/TypeScript build tool using native ES Modules and Rollup for production builds |
 | **WCM Mode** | Web Content Management Mode - AEM's authoring state (edit/preview/disabled) |
