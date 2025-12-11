@@ -12,8 +12,8 @@ import type { WidgetRegistry } from './types/widget.types';
  * 2. Add an entry here with the exact name used in data-widget-component
  */
 export const registry: WidgetRegistry = {
-    'ProductCard': lazy(() => import('./components/ProductCard')),
-    'Calculator': lazy(() => import('./components/Calculator')),
+    'ProductCard': lazy(() => import('./components/ProductCard.tsx')),
+    'Calculator': lazy(() => import('./components/Calculator.tsx')),
 };
 
 /**

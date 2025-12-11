@@ -232,7 +232,7 @@ The Integration Framework is the "glue" that connects AEM-rendered HTML to React
 
 **Purpose:** Bridges AEM's standard script loading with ES Modules.
 
-**Location:** `ui.frontend/src/loader.js`
+**Location:** `ui.frontend.react/src/loader.js`
 
 **What It Does:**
 
@@ -288,7 +288,7 @@ The Integration Framework is the "glue" that connects AEM-rendered HTML to React
 
 **Purpose:** Discovers widget containers in the DOM and mounts React components.
 
-**Location:** `ui.frontend/src/main.tsx`
+**Location:** `ui.frontend.react/src/main.tsx`
 
 **What It Does:**
 
@@ -352,7 +352,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 **Purpose:** Maps string names (from AEM HTML) to actual React components.
 
-**Location:** `ui.frontend/src/registry.ts`
+**Location:** `ui.frontend.react/src/registry.ts`
 
 **What It Does:**
 
@@ -385,7 +385,7 @@ export const registry: WidgetRegistry = {
 
 **Purpose:** Prevents one widget's error from crashing the entire page.
 
-**Location:** `ui.frontend/src/utils/ErrorBoundary.tsx`
+**Location:** `ui.frontend.react/src/utils/ErrorBoundary.tsx`
 
 **Problem Solved:**
 
@@ -648,7 +648,7 @@ module.exports = {
 │                      BUILD & DEPLOY PIPELINE                              │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                           │
-│   ui.frontend/src/                                                        │
+│   ui.frontend.react/src/                                                        │
 │   ├── main.jsx          ─┐                                               │
 │   ├── registry.js        │    ┌────────────┐     ┌────────────────┐     │
 │   ├── components/        ├───►│   Vite     │────►│   dist/        │     │
@@ -657,7 +657,7 @@ module.exports = {
 │                                                          │               │
 │                                                          ▼               │
 │                                              ┌────────────────────────┐  │
-│   ui.frontend/src/loader.js ────────────────►│  aem-clientlib-        │  │
+│   ui.frontend.react/src/loader.js ────────────────►│  aem-clientlib-        │  │
 │                                              │  generator             │  │
 │                                              └───────────┬────────────┘  │
 │                                                          │               │
@@ -832,7 +832,7 @@ sequenceDiagram
 **Step 1:** Create the React component with TypeScript
 
 ```
-ui.frontend/src/components/MyWidget/
+ui.frontend.react/src/components/MyWidget/
 ├── index.tsx
 ├── MyWidget.types.ts
 └── MyWidget.module.css
@@ -872,7 +872,7 @@ ui.apps/.../components/my-widget/
 **Step 5:** Build and deploy
 
 ```bash
-cd ui.frontend
+cd ui.frontend.react
 npm run build:clientlib
 cd ..
 mvn clean install -PautoInstallPackage
@@ -896,7 +896,7 @@ When integrating NBC Design System or UMA components within AEM, you create **wr
 ### Example: NBC Button Wrapper
 
 ```tsx
-// ui.frontend/src/components/NBCButton/index.tsx
+// ui.frontend.react/src/components/NBCButton/index.tsx
 import { Button, type ButtonProps } from '@nbc/design-system';
 import type { BaseWidgetProps } from '../../types/widget.types';
 
@@ -949,7 +949,7 @@ export default function NBCButton({
 ### Example: Complex Card Wrapper
 
 ```tsx
-// ui.frontend/src/components/NBCCard/index.tsx
+// ui.frontend.react/src/components/NBCCard/index.tsx
 import { Card, CardMedia, CardContent, Typography, Button } from '@nbc/design-system';
 import type { BaseWidgetProps } from '../../types/widget.types';
 
